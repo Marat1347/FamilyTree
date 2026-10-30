@@ -285,6 +285,9 @@ function getNodeConfig(p) {
       }
 
       return { drawExternalLabels: null };
+    },
+    nodeDimensions: function(ctx) {
+      return { width: 160, height: 64 };
     }
   };
 }
