@@ -15,6 +15,7 @@ html = f"""<!DOCTYPE html>
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <title>Семейное дерево</title>
+<link rel="manifest" href="manifest.json">
 <script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
 <style>
   :root {{
