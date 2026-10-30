@@ -5,9 +5,10 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<title>Семейное дерево</title>
+<meta name="theme-color" content="#0D1420">
 <link rel="manifest" href="manifest.json">
-<script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<title>Семейное дерево</title>
+<script src="./vendor/vis-network.min.js"></script>
 <style>
   :root {
     --bg: #0D1420;
@@ -17,61 +18,97 @@
     --male: #6FB1F2;
     --female: #ED9FC1;
     --gold: #E9BD5A;
+    --path: #34D399;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { height: 100%; background: var(--bg); color: var(--text); font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden; }
-  
+  html, body { height: 100%; background: var(--bg); color: var(--text);
+    font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden; }
   #network { width: 100%; height: 100%; }
-  
-  /* Верхняя панель */
+
   .header {
     position: absolute; top: 0; left: 0; right: 0;
-    background: rgba(23, 34, 51, 0.95);
-    padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; z-index: 10;
+    background: rgba(23, 34, 51, 0.95); padding: 12px 16px;
+    display: flex; flex-direction: column; gap: 10px; z-index: 10;
     box-shadow: 0 4px 15px rgba(0,0,0,0.5);
     border-bottom-left-radius: 16px; border-bottom-right-radius: 16px;
   }
-  .header h1 { font-size: 18px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+  .header h1 { font-size: 18px; font-weight: 600;
+    display: flex; justify-content: space-between; align-items: center; }
   .search-box {
     width: 100%; padding: 10px 14px; border-radius: 10px; border: none;
-    background: rgba(255,255,255,0.1); color: white; font-size: 15px; outline: none;
+    background: rgba(255,255,255,0.1); color: white; font-size: 15px;
+    outline: none; min-height: 44px;
   }
   .search-box::placeholder { color: #8892a0; }
-  .filters { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; scrollbar-width: none; }
+  .filters { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px;
+    scrollbar-width: none; }
   .filters::-webkit-scrollbar { display: none; }
   .filter-btn {
     background: rgba(255,255,255,0.1); border: none; color: var(--muted);
-    padding: 6px 14px; border-radius: 20px; font-size: 13px; white-space: nowrap; cursor: pointer;
+    padding: 8px 14px; border-radius: 20px; font-size: 13px;
+    white-space: nowrap; cursor: pointer; min-height: 40px;
   }
   .filter-btn.active { background: var(--male); color: #0D1420; font-weight: 600; }
 
-  /* Нижняя панель (Карточка) */
   .bottom-panel {
     position: absolute; bottom: 0; left: 0; right: 0;
     background: rgba(23, 34, 51, 0.98);
     border-top-left-radius: 24px; border-top-right-radius: 24px;
     padding: 20px; padding-bottom: 40px;
-    transform: translateY(100%); transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    transform: translateY(100%);
+    transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     z-index: 20; max-height: 75vh; display: flex; flex-direction: column;
     box-shadow: 0 -4px 20px rgba(0,0,0,0.5);
   }
   .bottom-panel.open { transform: translateY(0); }
-  .panel-handle { width: 40px; height: 5px; background: #4a5b75; border-radius: 3px; margin: 0 auto 15px auto; }
-  .close-panel { position: absolute; top: 15px; right: 20px; background: none; border: none; color: var(--muted); font-size: 24px; cursor: pointer; }
-  
-  .person-header { border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom: 12px; margin-bottom: 12px; }
+  .panel-handle { width: 40px; height: 5px; background: #4a5b75;
+    border-radius: 3px; margin: 0 auto 15px auto; }
+  .close-panel { position: absolute; top: 15px; right: 20px;
+    background: none; border: none; color: var(--muted); font-size: 24px;
+    cursor: pointer; }
+  .person-header { border-bottom: 1px solid rgba(255,255,255,0.1);
+    padding-bottom: 12px; margin-bottom: 12px; }
   .person-name { font-size: 22px; font-weight: bold; margin-bottom: 4px; }
   .person-meta { font-size: 13px; color: var(--muted); }
-  
   .scroll-content { overflow-y: auto; flex: 1; padding-right: 5px; }
   .rel-section { margin-top: 12px; }
-  .rel-title { font-size: 11px; text-transform: uppercase; color: var(--gold); margin-bottom: 6px; font-weight: bold; letter-spacing: 0.5px; }
+  .rel-title { font-size: 11px; text-transform: uppercase;
+    color: var(--gold); margin-bottom: 6px; font-weight: bold;
+    letter-spacing: 0.5px; }
   .rel-list { display: flex; flex-direction: column; gap: 6px; }
-  .rel-item {
-    background: rgba(255,255,255,0.05); padding: 10px 12px; border-radius: 8px;
-    font-size: 14px; cursor: pointer; display: flex; justify-content: space-between;
-  }
+  .rel-item { background: rgba(255,255,255,0.05); padding: 12px;
+    border-radius: 8px; font-size: 14px; cursor: pointer;
+    display: flex; justify-content: space-between; min-height: 44px;
+    align-items: center; }
   .rel-item:active { background: rgba(255,255,255,0.15); }
+
+  .fab-dock {
+    position: absolute; right: 16px; bottom: 24px;
+    display: flex; flex-direction: column; gap: 10px; z-index: 12;
+  }
+  .fab-btn {
+    width: 48px; height: 48px; border-radius: 14px;
+    background: rgba(23, 34, 51, 0.9);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    color: var(--text); font-size: 20px; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 14px rgba(0,0,0,0.3);
+    backdrop-filter: blur(10px);
+    -webkit-backdrop-filter: blur(10px);
+  }
+  .fab-btn:active { transform: scale(0.93); }
+
+  /* Toast для уведомлений */
+  .toast {
+    position: fixed; bottom: 80px; left: 50%;
+    transform: translateX(-50%) translateY(100px);
+    background: rgba(23, 34, 51, 0.98); color: var(--text);
+    padding: 12px 20px; border-radius: 12px; font-size: 14px;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4); z-index: 100;
+    opacity: 0; transition: all 0.3s; pointer-events: none;
+    max-width: 90vw;
+  }
+  .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
 </style>
 </head>
 <body>
@@ -88,6 +125,12 @@
   </div>
 </div>
 
+<div class="fab-dock">
+  <button class="fab-btn" title="К Венере" onclick="focusPerson('venera')">★</button>
+  <button class="fab-btn" title="Показать всё" onclick="network.fit({animation:true})">⛶</button>
+  <button class="fab-btn" title="Экспорт PNG" onclick="exportPNG()">📷</button>
+</div>
+
 <div class="bottom-panel" id="panel">
   <div class="panel-handle"></div>
   <button class="close-panel" onclick="closePanel()">✕</button>
@@ -97,6 +140,8 @@
   </div>
   <div class="scroll-content" id="p-relatives"></div>
 </div>
+
+<div class="toast" id="toast"></div>
 
 <script>
 const familyData = {
@@ -1103,13 +1148,13 @@ const familyData = {
     }
   ]
 };
+
 let network = null;
 let nodesDS = new vis.DataSet([]);
 let edgesDS = new vis.DataSet([]);
 let currentBranch = 'all';
 let selectedId = null;
 
-// Инициализация
 const container = document.getElementById('network');
 const data = { nodes: nodesDS, edges: edgesDS };
 const options = {
@@ -1117,8 +1162,8 @@ const options = {
     hierarchical: {
       direction: 'UD',
       sortMethod: 'directed',
-      levelSeparation: 140,
-      nodeSpacing: 150,
+      levelSeparation: 150,
+      nodeSpacing: 170,
       treeSpacing: 200,
       blockShifting: true,
       edgeMinimization: true
@@ -1129,7 +1174,7 @@ const options = {
     dragNodes: false,
     dragView: true,
     zoomView: true,
-    tooltipDelay: 300
+    hover: false
   },
   nodes: {
     shape: 'box',
@@ -1146,52 +1191,67 @@ const options = {
 
 network = new vis.Network(container, data, options);
 
-// Отрисовка графа
+function toast(msg, duration) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), duration || 2500);
+}
+
+function makeNode(p, exporting) {
+  let color = p.id === 'venera' ? '#E9BD5A' : (p.sex === 'F' ? '#ED9FC1' : '#6FB1F2');
+  let label = p.name;
+  if (p.id === 'venera') label += '\n★';
+  return {
+    id: p.id,
+    label: label,
+    level: p.generation,
+    color: { background: color, border: color },
+    font: { color: '#1B283B', bold: true, size: 13 },
+    widthConstraint: { maximum: 160 }
+  };
+}
+
+function makeEdge(r, index) {
+  const isMarriage = r.type === 'marriage';
+  return {
+    id: 'e_' + index,
+    from: r.source,
+    to: r.target,
+    arrows: r.type === 'parent' ? 'to' : '',
+    dashes: isMarriage,
+    color: r.type === 'parent' ? '#677C99' : (isMarriage ? '#ED9FC1' : '#859AB7'),
+    width: isMarriage ? 2 : 1.5
+  };
+}
+
 function renderGraph() {
-  nodesDS.clear(); edgesDS.clear();
-  
+  nodesDS.clear();
+  edgesDS.clear();
+
   const query = document.getElementById('search').value.toLowerCase().trim();
   const visibleNodes = new Set();
-  
-  // Фильтрация узлов
+
   familyData.people.forEach(p => {
     let show = true;
     if (currentBranch !== 'all' && p.branch !== currentBranch) show = false;
     if (query && !p.name.toLowerCase().includes(query)) show = false;
-    
     if (show) {
       visibleNodes.add(p.id);
-      let color = p.id === 'venera' ? '#E9BD5A' : (p.sex === 'F' ? '#ED9FC1' : '#6FB1F2');
-      let label = p.name + (p.id === 'venera' ? '\n★' : '');
-      
-      nodesDS.add({
-        id: p.id, label: label, level: p.generation,
-        color: { background: color, border: color },
-        font: { color: '#1B283B', bold: true, size: 13 },
-        widthConstraint: { maximum: 160 }
-      });
+      nodesDS.add(makeNode(p, false));
     }
   });
 
-  // Фильтрация связей
-  familyData.relations.forEach(r => {
+  familyData.relations.forEach((r, i) => {
     if (visibleNodes.has(r.source) && visibleNodes.has(r.target)) {
-      let isMarriage = r.type === 'marriage';
-      edgesDS.add({
-        from: r.source, to: r.target,
-        arrows: r.type === 'parent' ? 'to' : '',
-        dashes: isMarriage,
-        color: r.type === 'parent' ? '#677C99' : (isMarriage ? '#ED9FC1' : '#859AB7'),
-        width: isMarriage ? 2 : 1.5
-      });
+      edgesDS.add(makeEdge(r, i));
     }
   });
-  
+
   document.getElementById('stat').textContent = nodesDS.length + ' персон';
 }
 
-// Клик по узлу
-network.on("click", params => {
+network.on('click', params => {
   if (params.nodes.length > 0) {
     showPanel(params.nodes[0]);
   } else {
@@ -1199,21 +1259,21 @@ network.on("click", params => {
   }
 });
 
-// Показ нижней панели
 function showPanel(id) {
   selectedId = id;
   const p = familyData.people.find(x => x.id === id);
   if (!p) return;
-  
+
   document.getElementById('p-name').textContent = p.name;
-  document.getElementById('p-name').style.color = p.id === 'venera' ? '#E9BD5A' : (p.sex === 'F' ? '#ED9FC1' : '#6FB1F2');
-  
+  document.getElementById('p-name').style.color =
+    p.id === 'venera' ? '#E9BD5A' : (p.sex === 'F' ? '#ED9FC1' : '#6FB1F2');
+
   let meta = [];
   if (p.dates) meta.push(p.dates);
-  if (p.branch) meta.push(p.branch === 'paternal' ? 'Отцовская' : p.branch === 'maternal' ? 'Материнская' : 'Центр');
+  if (p.branch) meta.push(p.branch === 'paternal' ? 'Отцовская'
+    : p.branch === 'maternal' ? 'Материнская' : 'Центр');
   document.getElementById('p-meta').textContent = meta.join(' · ');
 
-  // Поиск родственников
   let parents = [], spouses = [], children = [], siblings = [];
   familyData.relations.forEach(r => {
     if (r.type === 'parent') {
@@ -1229,22 +1289,21 @@ function showPanel(id) {
   let html = '';
   function addBlock(title, arr) {
     if (arr.length === 0) return;
-    html += `<div class="rel-section"><div class="rel-title">${title} · ${arr.length}</div><div class="rel-list">`;
+    html += '<div class="rel-section"><div class="rel-title">' + title + ' · ' + arr.length + '</div><div class="rel-list">';
     arr.forEach(rid => {
       let rp = familyData.people.find(x => x.id === rid);
-      if (rp) html += `<div class="rel-item" onclick="focusPerson('${rid}')">${rp.name}</div>`;
+      if (rp) html += '<div class="rel-item" onclick="focusPerson(\'' + rid + '\')">' + rp.name + '</div>';
     });
-    html += `</div></div>`;
+    html += '</div></div>';
   }
 
   addBlock('Родители', parents);
   addBlock('Супруг(а)', spouses);
   addBlock('Дети', children);
   addBlock('Братья / Сёстры', siblings);
-  
+
   if (!html) html = '<div style="color:#A3B4CC;font-size:14px;">Нет данных о родственниках</div>';
   document.getElementById('p-relatives').innerHTML = html;
-  
   document.getElementById('panel').classList.add('open');
 }
 
@@ -1259,11 +1318,109 @@ function focusPerson(id) {
   showPanel(id);
 }
 
-// События
+// ============================================================
+// ЭКСПОРТ PNG (всё дерево, а не экран)
+// ============================================================
+function nextDraw(net) {
+  return new Promise((resolve, reject) => {
+    let timeout;
+    const done = () => { clearTimeout(timeout); resolve(); };
+    net.once('afterDrawing', done);
+    timeout = setTimeout(() => {
+      net.off('afterDrawing', done);
+      reject(new Error('Таймаут отрисовки'));
+    }, 6000);
+    net.redraw();
+  });
+}
+
+async function exportPNG() {
+  toast('Готовлю PNG...', 1500);
+  await document.fonts.ready;
+
+  const host = document.createElement('div');
+  const dpr = window.devicePixelRatio || 1;
+  host.style.cssText = 'position:fixed;left:-100000px;top:0;width:' +
+    Math.max(1, Math.floor(3600 / dpr)) + 'px;height:' +
+    Math.max(1, Math.floor(2400 / dpr)) + 'px;pointer-events:none;';
+  document.body.append(host);
+
+  let temp = null;
+  try {
+    const allNodes = familyData.people.map(p => makeNode(p, true));
+    const allEdges = familyData.relations.map((r, i) => makeEdge(r, i));
+
+    temp = new vis.Network(host, {
+      nodes: new vis.DataSet(allNodes),
+      edges: new vis.DataSet(allEdges)
+    }, options);
+
+    await nextDraw(temp);
+    temp.fit({ animation: false });
+    temp.moveTo({ scale: temp.getScale() * 0.85 });
+    await nextDraw(temp);
+
+    const srcCanvas = host.querySelector('canvas');
+    if (!srcCanvas || !srcCanvas.width) throw new Error('Canvas не создан');
+
+    if (srcCanvas.width * srcCanvas.height > 12000000) {
+      throw new Error('Слишком большой canvas для этого телефона');
+    }
+
+    const outCanvas = document.createElement('canvas');
+    outCanvas.width = srcCanvas.width;
+    outCanvas.height = srcCanvas.height;
+    const ctx = outCanvas.getContext('2d');
+    if (!ctx) throw new Error('Нет памяти');
+
+    ctx.fillStyle = '#0D1420';
+    ctx.fillRect(0, 0, outCanvas.width, outCanvas.height);
+    ctx.drawImage(srcCanvas, 0, 0);
+
+    ctx.fillStyle = '#A3B4CC';
+    ctx.font = 'bold 22px "Segoe UI", sans-serif';
+    ctx.fillText('Семейное дерево · ' + familyData.people.length + ' персон',
+                 28, outCanvas.height - 28);
+
+    outCanvas.toBlob(async (blob) => {
+      if (!blob) { toast('Не удалось создать PNG'); return; }
+      const file = new File([blob], 'family_tree.png', { type: 'image/png' });
+
+      if (navigator.canShare && navigator.canShare({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: 'Семейное дерево' });
+          toast('Отправлено!');
+          return;
+        } catch (e) {
+          if (e.name === 'AbortError') return;
+        }
+      }
+
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'family_tree.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      toast('PNG сохранён');
+    }, 'image/png');
+  } catch (e) {
+    toast('Ошибка: ' + e.message, 4000);
+  } finally {
+    if (temp) temp.destroy();
+    host.remove();
+  }
+}
+
+// ============================================================
+// СОБЫТИЯ
+// ============================================================
 document.getElementById('search').addEventListener('input', renderGraph);
 
 document.querySelectorAll('.filter-btn').forEach(btn => {
-  btn.addEventListener('click', (e) => {
+  btn.addEventListener('click', e => {
     document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
     e.target.classList.add('active');
     currentBranch = e.target.getAttribute('data-branch');
@@ -1272,7 +1429,14 @@ document.querySelectorAll('.filter-btn').forEach(btn => {
   });
 });
 
-// Запуск
+// Service Worker для офлайна
+if ('serviceWorker' in navigator && location.protocol === 'https:') {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('./sw.js', { scope: './' })
+      .catch(err => console.warn('SW не зарегистрирован:', err));
+  });
+}
+
 renderGraph();
 setTimeout(() => network.fit({ animation: true }), 100);
 </script>
