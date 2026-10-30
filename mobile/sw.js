@@ -1,6 +1,5 @@
-const CACHE = 'family-tree-v1';
-const ASSETS = ['./', './family_tree.html', './manifest.json',
-  './vendor/vis-network.min.js'];
+const CACHE = 'family-tree-v2';
+const ASSETS = ['./', './family_tree.html', './manifest.json', './vendor/vis-network.min.js'];
 
 self.addEventListener('install', e => {
   self.skipWaiting();
