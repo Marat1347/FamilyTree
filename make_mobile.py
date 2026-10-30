@@ -49,7 +49,6 @@ html = r"""<!DOCTYPE html>
     display: flex; flex-direction: column; gap: 10px; z-index: 10;
     box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     border-bottom-left-radius: 16px; border-bottom-right-radius: 16px;
-    backdrop-filter: blur(10px);
   }
   .header h1 { font-size: 18px; font-weight: 600;
     display: flex; justify-content: space-between; align-items: center; }
@@ -209,6 +208,13 @@ const options = {
   nodes: { shape: 'box', borderWidth: 2, margin: { top: 10, bottom: 10, left: 14, right: 14 }, font: { color: '#1B283B', bold: true, size: 13, face: 'Segoe UI' } },
   edges: { smooth: { type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4 }, width: 1.8 }
 };
+
+function toast(msg, duration) {
+  const el = document.getElementById('toast');
+  el.textContent = msg;
+  el.classList.add('show');
+  setTimeout(() => el.classList.remove('show'), duration || 2500);
+}
 
 function getNodeConfig(p) {
   const isSelected = selectedId === p.id;
