@@ -40,8 +40,7 @@ html = r"""<!DOCTYPE html>
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: var(--bg); color: var(--text);
-    font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden;
-    transition: background 0.3s, color 0.3s; }
+    font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden; }
   #network { width: 100%; height: 100%; }
 
   .header {
@@ -85,7 +84,7 @@ html = r"""<!DOCTYPE html>
     padding: 20px; padding-bottom: 40px; transform: translateY(100%);
     transition: transform 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275);
     z-index: 20; max-height: 75vh; display: flex; flex-direction: column;
-    box-shadow: 0 -4px 20px rgba(0,0,0,0.3); backdrop-filter: blur(10px);
+    box-shadow: 0 -4px 20px rgba(0,0,0,0.3);
   }
   .bottom-panel.open { transform: translateY(0); }
   .panel-handle { width: 40px; height: 5px; background: var(--muted);
@@ -124,7 +123,7 @@ html = r"""<!DOCTYPE html>
     background: var(--surface); border: 1px solid var(--border);
     color: var(--text); font-size: 20px;
     display: flex; align-items: center; justify-content: center;
-    box-shadow: 0 4px 14px rgba(0,0,0,0.2); backdrop-filter: blur(10px);
+    box-shadow: 0 4px 14px rgba(0,0,0,0.2);
   }
   .fab-btn:active { transform: scale(0.93); }
 
@@ -207,7 +206,7 @@ const options = {
   },
   physics: false,
   interaction: { dragNodes: false, dragView: true, zoomView: true },
-  nodes: { shape: 'box', borderWidth: 2, margin: { top: 10, bottom: 10, left: 14, right: 14 } },
+  nodes: { shape: 'box', borderWidth: 2, margin: { top: 10, bottom: 10, left: 14, right: 14 }, font: { color: '#1B283B', bold: true, size: 13, face: 'Segoe UI' } },
   edges: { smooth: { type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4 }, width: 1.8 }
 };
 
@@ -234,16 +233,8 @@ function getNodeConfig(p) {
       background: bg,
       border: inPath ? currentPalette.path : (isSearchMatch ? '#F59E0B' : (isSelected ? '#FFFFFF' : accent))
     },
-    font: {
-      color: '#1B283B', // Тёмный текст для контраста с ярким фоном
-      bold: { color: '#1B283B' },
-      size: 13,
-      face: 'Segoe UI',
-      multi: 'html' // Включаем поддержку HTML для переноса строк (в vis-network это безопасно для \n)
-    },
     borderWidth: (inPath || isSearchMatch || isSelected || p.id === 'venera') ? 3 : 1.5,
-    opacity: isDimmed ? 0.25 : 1.0,
-    widthConstraint: { minimum: 130, maximum: 170 }
+    opacity: isDimmed ? 0.25 : 1.0
   };
 }
 
@@ -481,4 +472,4 @@ html = html.replace("__JSON_DATA__", json_str)
 os.makedirs(MOBILE_DIR, exist_ok=True)
 with open(os.path.join(MOBILE_DIR, "family_tree.html"), 'w', encoding='utf-8') as f:
     f.write(html)
-print("✅ family_tree.html обновлён (стандартные карточки с текстом и новыми фичами)")
+print("✅ family_tree.html создан: " + os.path.join(MOBILE_DIR, "family_tree.html"))
