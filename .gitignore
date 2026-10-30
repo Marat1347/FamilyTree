@@ -1,0 +1,6 @@
+_obj/
+gui_native/dist/
+gui_native/app.res
+installer/
+*.bak*
+*.exe

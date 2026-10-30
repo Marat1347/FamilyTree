@@ -1,0 +1,1147 @@
+// FamilyTree GUI viewer. The CLI source supplies only the data model / JSON reader.
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#ifndef UNICODE
+#define UNICODE
+#endif
+#ifndef _UNICODE
+#define _UNICODE
+#endif
+#define main ftree_console_entry_not_used
+#include "../ftree.cpp"
+#undef main
+#include <windowsx.h>
+#include <gdiplus.h>
+#include <commdlg.h>
+#include <memory>
+#include <cmath>
+#include <string>
+#include <vector>
+#include <map>
+#include <algorithm>
+
+using namespace Gdiplus;
+
+// ============================================================
+// UI-КОНСТАНТЫ
+// ============================================================
+namespace Ui {
+    inline Color background() { return Color(255, 13, 20, 32); }
+    inline Color panel()      { return Color(255, 23, 34, 51); }
+    inline Color text()       { return Color(255, 234, 240, 248); }
+    inline Color muted()      { return Color(255, 163, 180, 204); }
+    inline Color male()       { return Color(255, 111, 177, 242); }
+    inline Color female()     { return Color(255, 237, 159, 193); }
+    inline Color gold()       { return Color(255, 233, 189, 90); }
+
+    inline Color accent(const Person& p) {
+        if (p.id == "venera") return gold();
+        if (p.sex == "F") return female();
+        return male();
+    }
+
+    inline RectF expanded(RectF r, REAL amount) {
+        r.Inflate(amount, amount);
+        return r;
+    }
+
+    inline void rounded(GraphicsPath& path, const RectF& r, REAL radius = 14) {
+        const REAL d = radius * 2;
+        path.AddArc(r.X, r.Y, d, d, 180, 90);
+        path.AddArc(r.GetRight() - d, r.Y, d, d, 270, 90);
+        path.AddArc(r.GetRight() - d, r.GetBottom() - d, d, d, 0, 90);
+        path.AddArc(r.X, r.GetBottom() - d, d, d, 90, 90);
+        path.CloseFigure();
+    }
+
+    inline REAL textHeight(Graphics& g, const std::wstring& value,
+                           REAL width, REAL size, bool bold = false) {
+        if (value.empty()) return 0;
+        Gdiplus::Font font(L"Segoe UI", size,
+                           bold ? FontStyleBold : FontStyleRegular, UnitPixel);
+        StringFormat format;
+        RectF bounds;
+        g.MeasureString(value.c_str(), (INT)value.size(), &font,
+                        RectF(0, 0, width, 10000), &format, &bounds);
+        return std::ceil(bounds.Height);
+    }
+
+    inline void label(Graphics& g, const std::wstring& value, const RectF& rect,
+                      REAL size, Color color, bool bold = false, bool wrap = false) {
+        if (value.empty()) return;
+        Gdiplus::Font font(L"Segoe UI", size,
+                           bold ? FontStyleBold : FontStyleRegular, UnitPixel);
+        SolidBrush brush(color);
+        StringFormat format;
+        if (!wrap) format.SetFormatFlags(StringFormatFlagsNoWrap);
+        format.SetTrimming(StringTrimmingNone);
+        g.DrawString(value.c_str(), (INT)value.size(), &font, rect, &format, &brush);
+    }
+
+    inline std::wstring branchName(const std::string& branch) {
+        if (branch == "paternal") return L"Отцовская ветвь";
+        if (branch == "maternal") return L"Материнская ветвь";
+        if (branch == "center")   return L"Центральная ветвь";
+        return L"Ветвь не указана";
+    }
+}
+
+// ============================================================
+// ГЛОБАЛЬНЫЕ
+// ============================================================
+static std::unique_ptr<FamilyTree> model;
+static HWND mainWindow, canvas, searchBox, peopleList, detailBox;
+static HFONT uiFont;
+static std::vector<std::string> listIds;  // "" = заголовок группы
+static std::string selected;
+static float zoom = .65f, panX = 30, panY = 70;
+static bool dragging = false, moved = false;
+static POINT mouseStart, mouseLast;
+static HBRUSH panelBrush;
+struct Card { std::string id; RectF rect; };
+static std::vector<Card> cards;
+static float treeWidth = 1, treeHeight = 1;
+
+static int detailsScroll = 0;
+static int detailsContentHeight = 0;
+struct DetailHit { std::string id; RectF rect; };
+static std::vector<DetailHit> detailHits;
+
+static std::string hoveredCard;
+static std::string hoveredDetail;
+static POINT mouseCanvasPt = { 0, 0 };
+static std::wstring currentSearchQuery;
+
+static std::wstring wide(const std::string& s) {
+    if (s.empty()) return {};
+    int n = MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), nullptr, 0);
+    std::wstring w(n, L'\0');
+    MultiByteToWideChar(CP_UTF8, 0, s.data(), (int)s.size(), w.data(), n);
+    return w;
+}
+
+static std::wstring text(HWND h) {
+    int n = GetWindowTextLengthW(h);
+    std::wstring s(n + 1, L'\0');
+    GetWindowTextW(h, s.data(), n + 1);
+    s.resize(n);
+    return s;
+}
+
+static UINT windowDpi(HWND h) {
+    HDC dc = GetDC(h);
+    UINT dpi = (UINT)GetDeviceCaps(dc, LOGPIXELSX);
+    ReleaseDC(h, dc);
+    return dpi ? dpi : 96;
+}
+
+static void collectRelatives(const std::string& id,
+                              std::vector<std::string>& parents,
+                              std::vector<std::string>& spouses,
+                              std::vector<std::string>& children,
+                              std::vector<std::string>& siblings) {
+    parents.clear(); spouses.clear(); children.clear(); siblings.clear();
+    for (const auto& rel : model->relations) {
+        if (rel.type == "parent") {
+            if (rel.tgt == id) parents.push_back(rel.src);
+            if (rel.src == id) children.push_back(rel.tgt);
+        } else if (rel.src == id || rel.tgt == id) {
+            const std::string other = (rel.src == id) ? rel.tgt : rel.src;
+            if (rel.type == "marriage") spouses.push_back(other);
+            else if (rel.type == "sibling") siblings.push_back(other);
+        }
+    }
+}
+
+// ============================================================
+// РАЗМЕТКА ДЕРЕВА
+// ============================================================
+static REAL cardHeight(Graphics& g, const Person& p, REAL width) {
+    const REAL textWidth = width - 48;
+    const REAL nameH = Ui::textHeight(g, wide(p.name), textWidth, 20, true);
+    const REAL maidenH = p.maiden.empty() ? 0 :
+        Ui::textHeight(g, L"урожд. " + wide(p.maiden), textWidth, 13) + 5;
+    return std::max(164.f, 60.f + nameH + 10.f + maidenH + 22.f
+                    + (p.dates.empty() ? 0.f : 22.f) + 18.f);
+}
+
+static void arrange() {
+    cards.clear();
+    std::map<int, std::vector<Person*>> rows;
+    for (auto& p : model->people) rows[p.gen].push_back(&p);
+
+    HDC dc = GetDC(canvas);
+    Graphics measure(dc);
+    const REAL cardWidth = 340;
+    const REAL gapX = 40;
+    const REAL gapY = 96;
+
+    size_t maxCount = 1;
+    for (const auto& row : rows) maxCount = std::max(maxCount, row.second.size());
+    treeWidth = (REAL)maxCount * (cardWidth + gapX) + 64;
+
+    REAL y = 110;
+    for (auto& row : rows) {
+        std::sort(row.second.begin(), row.second.end(), [](Person* a, Person* b) {
+            return a->branch != b->branch ? a->branch < b->branch : a->name < b->name;
+        });
+        REAL rowHeight = 164;
+        for (const auto* person : row.second)
+            rowHeight = std::max(rowHeight, cardHeight(measure, *person, cardWidth));
+
+        const REAL rowWidth = (REAL)row.second.size() * cardWidth +
+            (REAL)(row.second.empty() ? 0 : row.second.size() - 1) * gapX;
+        const REAL startX = (treeWidth - rowWidth) / 2;
+
+        for (size_t i = 0; i < row.second.size(); ++i) {
+            cards.push_back({ row.second[i]->id,
+                RectF(startX + (REAL)i * (cardWidth + gapX), y, cardWidth, rowHeight) });
+        }
+        y += rowHeight + gapY;
+    }
+    treeHeight = y + 40;
+    ReleaseDC(canvas, dc);
+}
+
+static void fit() {
+    RECT r; GetClientRect(canvas, &r);
+    zoom = std::clamp(std::min((r.right - 50.f) / treeWidth, (r.bottom - 50.f) / treeHeight), .025f, 1.2f);
+    panX = (r.right - treeWidth * zoom) / 2;
+    panY = (r.bottom - treeHeight * zoom) / 2;
+    InvalidateRect(canvas, nullptr, FALSE);
+}
+
+// ============================================================
+// ВЫБОР ПЕРСОНЫ
+// ============================================================
+static void selectPerson(const std::string& id, bool center) {
+    selected = id;
+    detailsScroll = 0;
+    InvalidateRect(detailBox, nullptr, FALSE);
+
+    if (center) {
+        RECT r; GetClientRect(canvas, &r);
+        for (auto& card : cards) if (card.id == id) {
+            zoom = .9f;
+            panX = r.right / 2.f - (card.rect.X + card.rect.Width / 2) * zoom;
+            panY = r.bottom / 2.f - (card.rect.Y + card.rect.Height / 2) * zoom;
+        }
+    }
+    InvalidateRect(canvas, nullptr, FALSE);
+}
+
+// ============================================================
+// СПИСОК СЛЕВА
+// ============================================================
+static bool matchesSearch(const Person& p) {
+    if (currentSearchQuery.empty()) return false;
+    auto name = wide(p.name);
+    if (!name.empty()) CharLowerBuffW(name.data(), (DWORD)name.size());
+    return name.find(currentSearchQuery) != std::wstring::npos;
+}
+
+static void filterList() {
+    auto query = text(searchBox);
+    if (!query.empty()) CharLowerBuffW(query.data(), (DWORD)query.size());
+    currentSearchQuery = query;
+    InvalidateRect(canvas, nullptr, FALSE);
+    std::vector<Person*> result;
+    for (auto& p : model->people) {
+        auto name = wide(p.name);
+        if (!name.empty()) CharLowerBuffW(name.data(), (DWORD)name.size());
+        if (query.empty() || name.find(query) != std::wstring::npos) result.push_back(&p);
+    }
+    std::sort(result.begin(), result.end(), [](Person* a, Person* b) {
+        if (a->gen != b->gen) return a->gen < b->gen;
+        return a->name < b->name;
+    });
+    SendMessageW(peopleList, LB_RESETCONTENT, 0, 0);
+    listIds.clear();
+    int curGen = -1;
+    for (auto* p : result) {
+        if (p->gen != curGen) {
+            curGen = p->gen;
+            auto header = L"─── ПОКОЛЕНИЕ " + std::to_wstring(curGen) + L" ───";
+            listIds.push_back("");
+            SendMessageW(peopleList, LB_ADDSTRING, 0, (LPARAM)header.c_str());
+        }
+        auto w = wide(p->name);
+        listIds.push_back(p->id);
+        SendMessageW(peopleList, LB_ADDSTRING, 0, (LPARAM)w.c_str());
+    }
+}
+
+// ============================================================
+// ПРАВАЯ ПАНЕЛЬ (кастомный контрол)
+// ============================================================
+static LRESULT CALLBACK DetailsProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
+    switch (msg) {
+    case WM_ERASEBKGND: return 1;
+
+    case WM_MOUSEWHEEL: {
+        RECT rc; GetClientRect(h, &rc);
+        int step = (int)((48 * (int)windowDpi(h)) / 96);
+        detailsScroll -= GET_WHEEL_DELTA_WPARAM(w) / WHEEL_DELTA * step;
+        int maxScroll = std::max(0, detailsContentHeight - (int)rc.bottom);
+        detailsScroll = std::clamp(detailsScroll, 0, maxScroll);
+        InvalidateRect(h, nullptr, FALSE);
+        return 0;
+    }
+    case WM_MOUSEMOVE: {
+        POINT pt = { GET_X_LPARAM(l), GET_Y_LPARAM(l) };
+        const REAL dpiScale = (REAL)windowDpi(h) / 96.f;
+        float cx = pt.x / dpiScale;
+        float cy = (pt.y + detailsScroll) / dpiScale;
+        std::string newHover;
+        for (const auto& hit : detailHits) {
+            if (hit.rect.Contains(PointF(cx, cy))) { newHover = hit.id; break; }
+        }
+        if (newHover != hoveredDetail) {
+            hoveredDetail = newHover;
+            InvalidateRect(h, nullptr, FALSE);
+        }
+        return 0;
+    }
+
+    case WM_LBUTTONDOWN: {
+        POINT pt = { GET_X_LPARAM(l), GET_Y_LPARAM(l) };
+    case WM_LBUTTONDOWN: {
+        POINT pt = { GET_X_LPARAM(l), GET_Y_LPARAM(l) };
+        const REAL dpiScale = (REAL)windowDpi(h) / 96.f;
+        float cx = pt.x / dpiScale;
+        float cy = (pt.y + detailsScroll) / dpiScale;
+        for (const auto& hit : detailHits) {
+            if (hit.rect.Contains(PointF(cx, cy))) {
+                selectPerson(hit.id, true);
+                return 0;
+            }
+        }
+        return 0;
+    }
+
+    case WM_SETCURSOR: {
+        POINT pt; GetCursorPos(&pt); ScreenToClient(h, &pt);
+        const REAL dpiScale = (REAL)windowDpi(h) / 96.f;
+        float cx = pt.x / dpiScale;
+        float cy = (pt.y + detailsScroll) / dpiScale;
+        bool overLink = false;
+        for (const auto& hit : detailHits) {
+            if (hit.rect.Contains(PointF(cx, cy))) { overLink = true; break; }
+        }
+        SetCursor(LoadCursorW(nullptr, overLink ? IDC_HAND : IDC_ARROW));
+        return TRUE;
+    }
+
+    case WM_PAINT: {
+        PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps);
+        RECT rc; GetClientRect(h, &rc);
+        if (!rc.right || !rc.bottom) { EndPaint(h, &ps); return 0; }
+
+        Bitmap buffer(rc.right, rc.bottom, PixelFormat32bppPARGB);
+        Graphics g(&buffer);
+        g.Clear(Ui::panel());
+        g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+        g.SetSmoothingMode(SmoothingModeAntiAlias);
+
+        detailHits.clear();
+        const REAL dpiScale = (REAL)windowDpi(h) / 96.f;
+        g.TranslateTransform(0, (REAL)-detailsScroll);
+        g.ScaleTransform(dpiScale, dpiScale);
+
+        const REAL width = rc.right / dpiScale;
+        const REAL x = 20;
+        const REAL contentWidth = width - 40;
+        REAL y = 22;
+
+        auto* p = model->find(selected);
+        if (!p) {
+            Ui::label(g, L"Выберите человека", RectF(x, y, contentWidth, 40),
+                      20, Ui::text(), true, true);
+            y += 50;
+            Ui::label(g, L"Кликните на карточку в дереве или строку в списке слева, "
+                          L"чтобы увидеть подробности и родственников.",
+                      RectF(x, y, contentWidth, 140), 13, Ui::muted(), false, true);
+            detailsContentHeight = 0;
+        } else {
+            auto textBlock = [&](const std::wstring& value, REAL size,
+                                 Color color, bool bold,
+                                 bool clickable = false,
+                                 const std::string& clickId = "") {
+                if (value.empty()) return;
+                REAL th = Ui::textHeight(g, value, contentWidth, size, bold);
+                RectF rect(x, y, contentWidth, th + 4);
+                if (clickable) {
+                    const bool isHover = (!clickId.empty() && clickId == hoveredDetail);
+                    SolidBrush hl(Color(isHover ? 36 : 16, 255, 255, 255));
+                    g.FillRectangle(&hl, rect);
+                    if (isHover) {
+                        Pen underline(Ui::accent(*p), 1.2f);
+                        g.DrawLine(&underline, rect.X + 14, rect.GetBottom() - 3,
+                                                rect.GetRight() - 8, rect.GetBottom() - 3);
+                    }
+                }
+                Ui::label(g, value, rect, size, color, bold, true);
+                if (clickable && !clickId.empty())
+                    detailHits.push_back({ clickId, rect });
+                y += th + 8;
+            };
+
+            auto section = [&](const std::wstring& title) {
+                y += 18;
+                Pen sep(Color(60, 163, 180, 204), 1);
+                g.DrawLine(&sep, x, y, x + contentWidth, y);
+                y += 14;
+                textBlock(title, 11, Ui::muted(), true);
+            };
+
+            textBlock(wide(p->name), 24, Ui::accent(*p), true);
+            if (!p->maiden.empty())
+                textBlock(L"урожд. " + wide(p->maiden), 13, Ui::muted(), false);
+            if (!p->dates.empty())
+                textBlock(wide(p->dates), 14, Ui::text(), false);
+            textBlock(Ui::branchName(p->branch), 13, Ui::muted(), false);
+
+            std::vector<std::string> parents, spouses, children, siblings;
+            collectRelatives(p->id, parents, spouses, children, siblings);
+
+            auto relatives = [&](const std::wstring& title, const std::vector<std::string>& ids) {
+                if (ids.empty()) return;
+                section(title + L"  ·  " + std::to_wstring(ids.size()));
+                for (const auto& rid : ids) {
+                    if (auto* r = model->find(rid))
+                        textBlock(L"• " + wide(r->name), 15, Ui::text(), false, true, rid);
+                }
+            };
+            relatives(L"РОДИТЕЛИ", parents);
+            relatives(L"СУПРУГИ", spouses);
+            relatives(L"ДЕТИ", children);
+            relatives(L"БРАТЬЯ И СЁСТРЫ", siblings);
+
+            detailsContentHeight = (int)((y + 24) * dpiScale);
+        }
+
+        Graphics screen(dc);
+        screen.DrawImage(&buffer, 0, 0);
+        EndPaint(h, &ps);
+        return 0;
+    }
+    }
+    return DefWindowProcW(h, msg, w, l);
+}
+
+// ============================================================
+// ОТРИСОВКА КАРТОЧКИ
+// ============================================================
+static void drawPersonCard(Graphics& g, const Person& p, const RectF& r,
+                           bool isSelected, bool detailed) {
+    const Color accent = Ui::accent(p);
+    const bool isHovered = (p.id == hoveredCard);
+    const bool isSearchHit = matchesSearch(p);
+    const bool isDimmed = (!currentSearchQuery.empty() && !isSearchHit && !isSelected);
+
+    // Венера — золотое обрамление
+    if (p.id == "venera") {
+        GraphicsPath outer;
+        Ui::rounded(outer, Ui::expanded(r, 4), 18);
+        Pen halo(Color(70, 233, 189, 90), 2.f);
+        g.DrawPath(&halo, &outer);
+    }
+
+    // Тень: при hover — глубже и шире
+    if (detailed || isHovered) {
+        int layers = isHovered ? 6 : 4;
+        BYTE shadowAlpha = isHovered ? 16 : 9;
+        int yShift = isHovered ? 8 : 5;
+        for (int i = layers; i >= 1; --i) {
+            RectF shadowRect = Ui::expanded(r, (REAL)(i * 1.8f));
+            shadowRect.Y += yShift;
+            GraphicsPath shadow;
+            Ui::rounded(shadow, shadowRect, 16);
+            SolidBrush brush(Color(shadowAlpha, 0, 0, 0));
+            g.FillPath(&brush, &shadow);
+        }
+    }
+
+    // Фон
+    GraphicsPath shape;
+    Ui::rounded(shape, r, 14);
+    LinearGradientBrush fill(PointF(r.X, r.Y), PointF(r.X, r.GetBottom()),
+                             Color(255, 36, 51, 73), Color(255, 27, 40, 59));
+    g.FillPath(&fill, &shape);
+
+    // Рамка: приоритет — selected > searchHit > hovered > обычная
+    Color borderColor = isSelected ? accent
+                      : isSearchHit ? Color(255, 255, 215, 0)
+                      : isHovered ? Color(255, 130, 165, 210)
+                      : Color(255, 58, 76, 100);
+    REAL borderWidth = (isSelected || isSearchHit) ? 2.6f : (isHovered ? 1.8f : 1.f);
+    Pen border(borderColor, borderWidth);
+    g.DrawPath(&border, &shape);
+
+    // Верхний блик
+    Pen highlight(Color(35, 255, 255, 255), 1.f);
+    g.DrawLine(&highlight, r.X + 18, r.Y + 1, r.GetRight() - 18, r.Y + 1);
+
+    // Точка-акцент
+    SolidBrush dot(accent);
+    g.FillEllipse(&dot, r.X + 20, r.Y + 20, 7.f, 7.f);
+
+    // Пол
+    Ui::label(g, p.sex == "F" ? L"ЖЕНЩИНА" : p.sex == "M" ? L"МУЖЧИНА" : L"ПЕРСОНА",
+              RectF(r.X + 34, r.Y + 14, 135, 18), 10, Ui::muted(), true);
+
+    // Венера — бейдж ЦЕНТР
+    if (p.id == "venera") {
+        const RectF badge(r.GetRight() - 94, r.Y + 11, 78, 24);
+        GraphicsPath badgeShape;
+        Ui::rounded(badgeShape, badge, 8);
+        SolidBrush fillBadge(Color(35, 233, 189, 90));
+        g.FillPath(&fillBadge, &badgeShape);
+        Ui::label(g, L"ЦЕНТР",
+                  RectF(badge.X + 15, badge.Y + 4, badge.Width - 20, 18),
+                  10, Ui::gold(), true);
+    }
+
+    // Имя
+    const REAL x = r.X + 24;
+    const REAL textWidth = r.Width - 48;
+    REAL y = r.Y + 42;
+
+    const REAL nameH = Ui::textHeight(g, wide(p.name), textWidth, 20, true);
+    Ui::label(g, wide(p.name), RectF(x, y, textWidth, nameH + 2), 20, Ui::text(), true, true);
+
+    // Если мелкий масштаб — детали не рисуем
+    if (!detailed) {
+        if (isDimmed) {
+            SolidBrush dim(Color(165, 13, 20, 32));
+            g.FillPath(&dim, &shape);
+        }
+        return;
+    }
+
+    y += nameH + 10;
+
+    if (!p.maiden.empty()) {
+        const std::wstring maiden = L"урожд. " + wide(p.maiden);
+        const REAL h = Ui::textHeight(g, maiden, textWidth, 13);
+        Ui::label(g, maiden, RectF(x, y, textWidth, h + 2), 13, Ui::muted(), false, true);
+        y += h + 5;
+    }
+
+    Ui::label(g, Ui::branchName(p.branch), RectF(x, y, textWidth, 21), 12, Ui::muted());
+    y += 22;
+
+    if (!p.dates.empty())
+        Ui::label(g, wide(p.dates), RectF(x, y, textWidth, 21), 13, Ui::text());
+
+    // Затемнение остальных при активном поиске
+    if (isDimmed) {
+        SolidBrush dim(Color(165, 13, 20, 32));
+        g.FillPath(&dim, &shape);
+    }
+}
+
+// ============================================================
+// ПОКОЛЕНИЯ
+// ============================================================
+static void drawGenerationGuides(Graphics& g) {
+    struct RowBounds { REAL left, right, top; };
+    std::map<int, RowBounds> rows;
+    for (const auto& card : cards) {
+        auto* person = model->find(card.id);
+        if (!person) continue;
+        auto it = rows.find(person->gen);
+        if (it == rows.end()) {
+            rows.emplace(person->gen,
+                RowBounds{ card.rect.X, card.rect.GetRight(), card.rect.Y });
+        } else {
+            it->second.left = std::min(it->second.left, card.rect.X);
+            it->second.right = std::max(it->second.right, card.rect.GetRight());
+            it->second.top = std::min(it->second.top, card.rect.Y);
+        }
+    }
+    for (const auto& entry : rows) {
+        const auto& row = entry.second;
+        const REAL y = row.top - 34;
+        Ui::label(g, L"ПОКОЛЕНИЕ " + std::to_wstring(entry.first),
+                  RectF(row.left, y, 145, 20), 11, Ui::muted(), true);
+        if (row.right > row.left + 160) {
+            Pen line(Color(55, 163, 180, 204), 1.f);
+            g.DrawLine(&line, row.left + 150, y + 9, row.right, y + 9);
+        }
+    }
+}
+
+// ============================================================
+// ЭКСПОРТ PNG
+// ============================================================
+static int GetEncoderClsid(const WCHAR* format, CLSID* pClsid) {
+    UINT num = 0, size = 0;
+    GetImageEncodersSize(&num, &size);
+    if (size == 0) return -1;
+    std::vector<BYTE> buf(size);
+    auto* pImageCodecInfo = reinterpret_cast<ImageCodecInfo*>(buf.data());
+    GetImageEncoders(num, size, pImageCodecInfo);
+    for (UINT j = 0; j < num; ++j) {
+        if (wcscmp(pImageCodecInfo[j].MimeType, format) == 0) {
+            *pClsid = pImageCodecInfo[j].Clsid;
+            return (int)j;
+        }
+    }
+    return -1;
+}
+
+// Рисует содержимое дерева без экранных плашек и трансформаций.
+// Вызывается из paintTree (с zoom) и из exportPng (с 1.0 для полной детализации).
+static void renderTreeContent(Graphics& g, float currentZoom) {
+    std::map<std::string, RectF> boxes;
+    for (const auto& c : cards) boxes[c.id] = c.rect;
+
+    drawGenerationGuides(g);
+
+    const bool hasSelection = !selected.empty();
+
+    for (const auto& rel : model->relations) {
+        if (!boxes.count(rel.src) || !boxes.count(rel.tgt)) continue;
+        const auto a = boxes.at(rel.src);
+        const auto b = boxes.at(rel.tgt);
+        const bool focused = hasSelection && (rel.src == selected || rel.tgt == selected);
+        if (rel.type == "sibling" && !focused) continue;
+
+        const BYTE alpha = !hasSelection ? 175 : focused ? 255 : 45;
+        Color color(alpha, 143, 166, 196);
+        REAL width = focused ? 2.8f : 1.6f;
+        GraphicsPath path;
+
+        if (rel.type == "parent") {
+            const PointF start(a.X + a.Width / 2, a.GetBottom() + 3);
+            const PointF end(b.X + b.Width / 2, b.Y - 7);
+            const REAL bend = (end.Y - start.Y) * 0.48f;
+            path.AddBezier(start, PointF(start.X, start.Y + bend),
+                           PointF(end.X, end.Y - bend), end);
+            if (focused) color = Color(255, 210, 225, 245);
+            Pen pen(color, width);
+            g.DrawPath(&pen, &path);
+        } else {
+            const bool leftToRight = a.X + a.Width / 2 < b.X + b.Width / 2;
+            const PointF start(leftToRight ? a.GetRight() + 4 : a.X - 4, a.Y + a.Height / 2);
+            const PointF end(leftToRight ? b.X - 4 : b.GetRight() + 4, b.Y + b.Height / 2);
+            const REAL middleX = (start.X + end.X) / 2;
+            path.AddBezier(start, PointF(middleX, start.Y),
+                           PointF(middleX, end.Y), end);
+            Pen pen(rel.type == "marriage" ? Color(alpha, 194, 137, 165)
+                                           : Color(alpha, 133, 154, 183),
+                    focused ? 2.2f : 1.4f);
+            pen.SetDashStyle(rel.type == "marriage" ? DashStyleDash : DashStyleDot);
+            g.DrawPath(&pen, &path);
+        }
+    }
+
+    for (const auto& card : cards) {
+        auto* person = model->find(card.id);
+        if (!person) continue;
+        drawPersonCard(g, *person, card.rect, card.id == selected, currentZoom >= 0.55f);
+    }
+}
+
+static void exportPng() {
+    wchar_t fileName[MAX_PATH] = L"Семейное_дерево.png";
+    OPENFILENAMEW ofn{};
+    ofn.lStructSize = sizeof(ofn);
+    ofn.hwndOwner = mainWindow;
+    ofn.lpstrFilter = L"Изображение PNG (*.png)\0*.png\0Все файлы (*.*)\0*.*\0";
+    ofn.lpstrFile = fileName;
+    ofn.nMaxFile = MAX_PATH;
+    ofn.lpstrDefExt = L"png";
+    ofn.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST;
+
+    if (!GetSaveFileNameW(&ofn)) return;
+
+    const float margin = 48.f;
+    float exportScale = 1.0f;
+    int bmpW = (int)((treeWidth + margin * 2) * exportScale);
+    int bmpH = (int)((treeHeight + margin * 2) * exportScale);
+
+    if (bmpW > 8192) {
+        exportScale = 8192.f / (treeWidth + margin * 2);
+        bmpW = (int)((treeWidth + margin * 2) * exportScale);
+        bmpH = (int)((treeHeight + margin * 2) * exportScale);
+    }
+
+    Bitmap bmp(bmpW, bmpH, PixelFormat32bppPARGB);
+    if (bmp.GetLastStatus() != Ok) {
+        MessageBoxW(mainWindow, L"Недостаточно памяти для создания PNG.",
+                    L"Ошибка", MB_OK | MB_ICONERROR);
+        return;
+    }
+
+    Graphics g(&bmp);
+    g.Clear(Ui::background());
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+    g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+
+    g.TranslateTransform(margin * exportScale, margin * exportScale);
+    g.ScaleTransform(exportScale, exportScale);
+    renderTreeContent(g, 1.0f);
+
+    CLSID pngClsid;
+    if (GetEncoderClsid(L"image/png", &pngClsid) >= 0
+        && bmp.Save(fileName, &pngClsid, nullptr) == Ok) {
+        MessageBoxW(mainWindow, L"Дерево успешно сохранено в PNG!",
+                    L"Экспорт завершён", MB_OK | MB_ICONINFORMATION);
+    } else {
+        MessageBoxW(mainWindow, L"Не удалось сохранить файл PNG.",
+                    L"Ошибка", MB_OK | MB_ICONERROR);
+    }
+}
+
+// ============================================================
+// ОСНОВНАЯ ОТРИСОВКА
+// ============================================================
+static void paintTree(HDC dc) {
+    RECT client; GetClientRect(canvas, &client);
+    if (!client.right || !client.bottom) return;
+
+    Bitmap buffer(client.right, client.bottom, PixelFormat32bppPARGB);
+    Graphics g(&buffer);
+    g.Clear(Ui::background());
+    g.SetSmoothingMode(SmoothingModeAntiAlias);
+    g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+
+    g.TranslateTransform(panX, panY);
+    g.ScaleTransform(zoom, zoom);
+
+    renderTreeContent(g, zoom);
+
+    g.ResetTransform();
+    const REAL dpiScale = windowDpi(canvas) / 96.f;
+    const REAL screenWidth = client.right / dpiScale;
+    const REAL screenHeight = client.bottom / dpiScale;
+    g.ScaleTransform(dpiScale, dpiScale);
+
+    const REAL headerH = 54;
+    const REAL footerH = 34;
+    SolidBrush bar(Color(245, 20, 30, 46));
+    g.FillRectangle(&bar, (REAL)0, (REAL)0, screenWidth, headerH);
+    g.FillRectangle(&bar, (REAL)0, screenHeight - footerH, screenWidth, footerH);
+
+    Ui::label(g, L"Семейная история", RectF(20, 15, 260, 28), 19, Ui::text(), true);
+
+    const std::wstring status = std::to_wstring(model->people.size()) + L" персон   ·   "
+        + std::to_wstring((int)(zoom * 100)) + L"%";
+    Ui::label(g, status, RectF(std::max(290.f, screenWidth - 220), 20, 205, 22),
+              12, Ui::muted());
+
+    REAL legendX = 18;
+    const REAL legendY = screenHeight - 23;
+    auto legendItem = [&](Color color, const wchar_t* caption, REAL advance) {
+        SolidBrush dot(color);
+        g.FillEllipse(&dot, legendX, legendY + 3, 6.f, 6.f);
+        Ui::label(g, caption, RectF(legendX + 13, legendY - 1, advance - 13, 20),
+                  11, Ui::muted());
+        legendX += advance;
+    };
+    legendItem(Ui::male(), L"Мужчины", 95);
+    legendItem(Ui::female(), L"Женщины", 100);
+    legendItem(Ui::gold(), L"Центр", 75);
+
+    if (screenWidth > 760) {
+        Ui::label(g, L"Колёсико — масштаб   ·   Потянуть — обзор",
+                  RectF(screenWidth - 355, legendY - 1, 340, 20), 11, Ui::muted());
+    }
+
+    // Тултип при наведении на карточку
+    if (!hoveredCard.empty() && !dragging) {
+        if (auto* hp = model->find(hoveredCard)) {
+            std::vector<std::string> par, spo, chi, sib;
+            collectRelatives(hp->id, par, spo, chi, sib);
+
+            std::wstring title = wide(hp->name);
+            if (!hp->maiden.empty()) title += L" (урожд. " + wide(hp->maiden) + L")";
+
+            std::wstring line2 = Ui::branchName(hp->branch)
+                               + L"   ·   Поколение " + std::to_wstring(hp->gen);
+            if (!hp->dates.empty()) line2 += L"   ·   " + wide(hp->dates);
+
+            std::wstring line3 = L"Родителей: " + std::to_wstring(par.size())
+                               + L"   Детей: " + std::to_wstring(chi.size())
+                               + L"   Супруг(а): " + std::to_wstring(spo.size());
+
+            const REAL tipW = 360.f, tipH = 82.f;
+            const REAL mx = mouseCanvasPt.x / dpiScale;
+            const REAL my = mouseCanvasPt.y / dpiScale;
+            REAL tipX = mx + 18.f, tipY = my + 18.f;
+            if (tipX + tipW > screenWidth - 12.f) tipX = mx - tipW - 12.f;
+            if (tipY + tipH > screenHeight - 46.f) tipY = my - tipH - 12.f;
+
+            RectF tipRect(tipX, tipY, tipW, tipH);
+            GraphicsPath tipPath;
+            Ui::rounded(tipPath, tipRect, 10);
+            SolidBrush tipBg(Color(248, 16, 24, 38));
+            Pen tipBorder(Ui::accent(*hp), 1.4f);
+            g.FillPath(&tipBg, &tipPath);
+            g.DrawPath(&tipBorder, &tipPath);
+
+            Ui::label(g, title, RectF(tipX + 14, tipY + 10, tipW - 28, 22), 14, Ui::text(), true);
+            Ui::label(g, line2, RectF(tipX + 14, tipY + 34, tipW - 28, 18), 11, Ui::muted());
+            Ui::label(g, line3, RectF(tipX + 14, tipY + 56, tipW - 28, 18), 11, Ui::accent(*hp));
+        }
+    }
+
+    g.ResetTransform();
+    Graphics screen(dc);
+    screen.DrawImage(&buffer, 0, 0);
+}
+
+// ============================================================
+// CANVAS + MAIN
+// ============================================================
+static void copyToClipboard(HWND owner, const std::wstring& str) {
+    if (!OpenClipboard(owner)) return;
+    EmptyClipboard();
+    size_t bytes = (str.size() + 1) * sizeof(wchar_t);
+    if (HGLOBAL hMem = GlobalAlloc(GMEM_MOVEABLE, bytes)) {
+        if (void* p = GlobalLock(hMem)) {
+            memcpy(p, str.c_str(), bytes);
+            GlobalUnlock(hMem);
+            SetClipboardData(CF_UNICODETEXT, hMem);
+        }
+    }
+    CloseClipboard();
+}
+
+static LRESULT CALLBACK CanvasProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
+    switch (msg) {
+        case WM_ERASEBKGND: return 1;
+        case WM_PAINT: {
+            PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps);
+            paintTree(dc); EndPaint(h, &ps); return 0;
+        }
+        case WM_LBUTTONDOWN:
+            mouseStart = mouseLast = { GET_X_LPARAM(l), GET_Y_LPARAM(l) };
+            dragging = true; moved = false; SetCapture(h); return 0;
+        case WM_MOUSEMOVE: {
+            mouseCanvasPt = { GET_X_LPARAM(l), GET_Y_LPARAM(l) };
+            if (dragging) {
+                if (std::abs(mouseCanvasPt.x - mouseStart.x) + std::abs(mouseCanvasPt.y - mouseStart.y) > 4)
+                    moved = true;
+                panX += mouseCanvasPt.x - mouseLast.x;
+                panY += mouseCanvasPt.y - mouseLast.y;
+                mouseLast = mouseCanvasPt;
+                InvalidateRect(h, nullptr, FALSE);
+            } else {
+                PointF worldPt((mouseCanvasPt.x - panX) / zoom, (mouseCanvasPt.y - panY) / zoom);
+                std::string newHover;
+                for (const auto& card : cards) {
+                    if (card.rect.Contains(worldPt)) { newHover = card.id; break; }
+                }
+                if (newHover != hoveredCard) {
+                    hoveredCard = newHover;
+                    SetCursor(LoadCursorW(nullptr, hoveredCard.empty() ? IDC_ARROW : IDC_HAND));
+                    InvalidateRect(h, nullptr, FALSE);
+                }
+            }
+            // Просим WM_MOUSELEAVE, чтобы сбросить hover при выходе
+            TRACKMOUSEEVENT tme{};
+            tme.cbSize = sizeof(tme);
+            tme.dwFlags = TME_LEAVE;
+            tme.hwndTrack = h;
+            TrackMouseEvent(&tme);
+            return 0;
+        }
+        case WM_MOUSELEAVE:
+            if (!hoveredCard.empty()) {
+                hoveredCard.clear();
+                SetCursor(LoadCursorW(nullptr, IDC_ARROW));
+                InvalidateRect(h, nullptr, FALSE);
+            }
+            return 0;
+        case WM_CAPTURECHANGED: dragging = false; return 0;
+        case WM_LBUTTONUP: {
+            bool click = dragging && !moved; dragging = false; ReleaseCapture();
+            if (click) {
+                PointF p((GET_X_LPARAM(l) - panX) / zoom, (GET_Y_LPARAM(l) - panY) / zoom);
+                for (auto& card : cards) if (card.rect.Contains(p)) {
+                    selectPerson(card.id, false);
+                    break;
+                }
+            }
+            return 0;
+        }
+        case WM_MOUSEWHEEL: {
+            POINT p = { GET_X_LPARAM(l), GET_Y_LPARAM(l) };
+            ScreenToClient(h, &p);
+            float next = std::clamp(zoom * (GET_WHEEL_DELTA_WPARAM(w) > 0 ? 1.15f : 1 / 1.15f), .025f, 3.f);
+            panX = p.x - (p.x - panX) * next / zoom;
+            panY = p.y - (p.y - panY) * next / zoom;
+            zoom = next;
+            InvalidateRect(h, nullptr, FALSE); return 0;
+        }
+        case WM_RBUTTONUP: {
+            PointF worldPt((GET_X_LPARAM(l) - panX) / zoom, (GET_Y_LPARAM(l) - panY) / zoom);
+            std::string targetId;
+            for (const auto& card : cards) {
+                if (card.rect.Contains(worldPt)) { targetId = card.id; break; }
+            }
+            if (targetId.empty()) return 0;
+            auto* p = model->find(targetId);
+            if (!p) return 0;
+
+            HMENU menu = CreatePopupMenu();
+            AppendMenuW(menu, MF_STRING, 1, L"Центрировать в дереве");
+            AppendMenuW(menu, MF_STRING, 2, L"Скопировать имя");
+            AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+            AppendMenuW(menu, MF_STRING, 3, L"Экспорт PNG");
+
+            POINT screenPt = { GET_X_LPARAM(l), GET_Y_LPARAM(l) };
+            ClientToScreen(h, &screenPt);
+            int cmd = TrackPopupMenu(menu, TPM_RETURNCMD | TPM_RIGHTBUTTON,
+                                     screenPt.x, screenPt.y, 0, h, nullptr);
+            DestroyMenu(menu);
+
+            if (cmd == 1) selectPerson(targetId, true);
+            else if (cmd == 2) copyToClipboard(mainWindow, wide(p->name));
+            else if (cmd == 3) exportPng();
+            return 0;
+        }
+    }
+    return DefWindowProcW(h, msg, w, l);
+}
+
+static void resize(HWND h) {
+    RECT r; GetClientRect(h, &r);
+    int width = r.right, height = r.bottom;
+    MoveWindow(searchBox, 16, 62, 238, 32, TRUE);
+    MoveWindow(peopleList, 16, 106, 238, std::max(50, height - 156), TRUE);
+    MoveWindow(detailBox, std::max(280, width - 286), 62, 270, std::max(50, height - 114), TRUE);
+    MoveWindow(canvas, 270, 54, std::max(50, width - 570), std::max(50, height - 104), TRUE);
+    MoveWindow(GetDlgItem(h, 102), 16, 14, 92, 32, TRUE);
+    MoveWindow(GetDlgItem(h, 103), 114, 14, 76, 32, TRUE);
+    MoveWindow(GetDlgItem(h, 105), 196, 14, 58, 32, TRUE);
+}
+
+static LRESULT CALLBACK MainProc(HWND h, UINT msg, WPARAM w, LPARAM l) {
+    switch (msg) {
+        case WM_CREATE:
+            mainWindow = h;
+            searchBox = CreateWindowExW(WS_EX_CLIENTEDGE, L"EDIT", L"",
+                WS_CHILD | WS_VISIBLE | ES_AUTOHSCROLL, 0, 0, 0, 0, h, (HMENU)100, nullptr, nullptr);
+            SendMessageW(searchBox, 0x1501, TRUE, (LPARAM)L"Поиск родственника...");
+
+            peopleList = CreateWindowExW(0, L"LISTBOX", L"",
+                WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_NOINTEGRALHEIGHT
+                | LBS_OWNERDRAWVARIABLE | LBS_HASSTRINGS,
+                0, 0, 0, 0, h, (HMENU)101, nullptr, nullptr);
+
+            detailBox = CreateWindowExW(0, L"FamilyTreeDetails", L"",
+                WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN,
+                0, 0, 0, 0, h, (HMENU)104, nullptr, nullptr);
+
+            CreateWindowExW(0, L"BUTTON", L"Показать всё",
+                WS_CHILD | WS_VISIBLE | BS_FLAT, 0, 0, 0, 0, h, (HMENU)102, nullptr, nullptr);
+            CreateWindowExW(0, L"BUTTON", L"К Венере",
+                WS_CHILD | WS_VISIBLE | BS_FLAT, 0, 0, 0, 0, h, (HMENU)103, nullptr, nullptr);
+            CreateWindowExW(0, L"BUTTON", L"PNG",
+                WS_CHILD | WS_VISIBLE | BS_FLAT, 0, 0, 0, 0, h, (HMENU)105, nullptr, nullptr);
+            canvas = CreateWindowExW(0, L"FamilyTreeCanvas", L"",
+                WS_CHILD | WS_VISIBLE, 0, 0, 0, 0, h, nullptr, nullptr, nullptr);
+
+            for (HWND child = GetWindow(h, GW_CHILD); child; child = GetWindow(child, GW_HWNDNEXT))
+                SendMessageW(child, WM_SETFONT, (WPARAM)uiFont, TRUE);
+            arrange(); filterList(); return 0;
+
+        case WM_SIZE: resize(h); return 0;
+        case WM_GETMINMAXINFO:
+            ((MINMAXINFO*)l)->ptMinTrackSize = { 1000, 650 }; return 0;
+
+        case WM_MEASUREITEM: {
+            auto* m = reinterpret_cast<MEASUREITEMSTRUCT*>(l);
+            if (m->CtlID == 101) {
+                int dpi = (int)windowDpi(h);
+                int idx = (int)m->itemID;
+                bool isHeader = (idx >= 0 && (size_t)idx < listIds.size() && listIds[idx].empty());
+                m->itemHeight = MulDiv(isHeader ? 32 : 54, dpi, 96);
+                return TRUE;
+            }
+            break;
+        }
+
+        case WM_DRAWITEM: {
+            auto* d = reinterpret_cast<DRAWITEMSTRUCT*>(l);
+            if (d->CtlID != 101) break;
+            if ((int)d->itemID == -1 || d->itemID >= listIds.size()) return TRUE;
+
+            const REAL scale = (REAL)windowDpi(peopleList) / 96.f;
+            Graphics g(d->hDC);
+            g.SetSmoothingMode(SmoothingModeAntiAlias);
+            g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
+
+            const RectF r((REAL)d->rcItem.left, (REAL)d->rcItem.top,
+                          (REAL)(d->rcItem.right - d->rcItem.left),
+                          (REAL)(d->rcItem.bottom - d->rcItem.top));
+
+            if (listIds[d->itemID].empty()) {
+                SolidBrush bg(Ui::background());
+                g.FillRectangle(&bg, r);
+                wchar_t buf[256];
+                SendMessageW(peopleList, LB_GETTEXT, d->itemID, (LPARAM)buf);
+                Ui::label(g, buf, RectF(r.X + 10, r.Y + 8, r.Width - 20, 20),
+                          10, Ui::muted(), true);
+                return TRUE;
+            }
+
+            auto* person = model->find(listIds[d->itemID]);
+            if (!person) return TRUE;
+
+            const bool active = (d->itemState & ODS_SELECTED) != 0;
+            SolidBrush bg(active ? Color(255, 43, 62, 88) : Ui::panel());
+            g.FillRectangle(&bg, r);
+
+            SolidBrush dot(Ui::accent(*person));
+            g.FillEllipse(&dot, r.X + 12 * scale, r.Y + 14 * scale, 6 * scale, 6 * scale);
+
+            Ui::label(g, wide(person->name),
+                      RectF(r.X + 28 * scale, r.Y + 7 * scale, r.Width - 36 * scale, 23 * scale),
+                      14 * scale, Ui::text(), active);
+
+            Ui::label(g, Ui::branchName(person->branch),
+                      RectF(r.X + 28 * scale, r.Y + 31 * scale, r.Width - 36 * scale, 17 * scale),
+                      11 * scale, Ui::muted());
+
+            if (d->itemState & ODS_FOCUS) DrawFocusRect(d->hDC, &d->rcItem);
+            return TRUE;
+        }
+
+        case WM_COMMAND:
+            if (LOWORD(w) == 100 && HIWORD(w) == EN_CHANGE) filterList();
+            if (LOWORD(w) == 101 && HIWORD(w) == LBN_SELCHANGE) {
+                auto index = SendMessageW(peopleList, LB_GETCURSEL, 0, 0);
+                if (index >= 0 && (size_t)index < listIds.size()) {
+                    if (listIds[index].empty()) {
+                        int prevIdx = -1;
+                        for (size_t i = 0; i < listIds.size(); ++i)
+                            if (!listIds[i].empty() && listIds[i] == selected) { prevIdx = (int)i; break; }
+                        SendMessageW(peopleList, LB_SETCURSEL, (WPARAM)prevIdx, 0);
+                    } else {
+                        selectPerson(listIds[index], true);
+                    }
+                }
+            }
+            if (LOWORD(w) == 102) fit();
+            if (LOWORD(w) == 103 && model->find("venera")) selectPerson("venera", true);
+            if (LOWORD(w) == 105) exportPng();
+            return 0;
+
+        case WM_CTLCOLOREDIT:
+            SetTextColor((HDC)w, RGB(218, 229, 246));
+            SetBkColor((HDC)w, RGB(30, 44, 66));
+            return (LRESULT)panelBrush;
+        case WM_CTLCOLORSTATIC:
+        case WM_CTLCOLORLISTBOX:
+            SetTextColor((HDC)w, RGB(218, 229, 246));
+            SetBkColor((HDC)w, RGB(23, 34, 51));
+            return (LRESULT)panelBrush;
+
+        case WM_PAINT: {
+            PAINTSTRUCT ps; HDC dc = BeginPaint(h, &ps);
+            RECT r; GetClientRect(h, &r);
+            FillRect(dc, &r, panelBrush);
+            SetBkMode(dc, TRANSPARENT);
+            SetTextColor(dc, RGB(161, 180, 207));
+            auto old = SelectObject(dc, uiFont);
+            std::wstring legend = L"Синий — мужчины  ·  Розовый — женщины  ·  Золотой — центр     |     Колёсико: масштаб  ·  Перетаскивание: обзор";
+            RECT footer = { 18, r.bottom - 38, r.right - 18, r.bottom - 8 };
+            DrawTextW(dc, legend.c_str(), -1, &footer, DT_LEFT | DT_SINGLELINE | DT_VCENTER);
+            SelectObject(dc, old);
+            EndPaint(h, &ps);
+            return 0;
+        }
+        case WM_DESTROY: PostQuitMessage(0); return 0;
+    }
+    return DefWindowProcW(h, msg, w, l);
+}
+
+int WINAPI wWinMain(HINSTANCE instance, HINSTANCE, PWSTR, int show) {
+    SetProcessDPIAware();
+    ULONG_PTR token;
+    GdiplusStartupInput startup;
+    if (GdiplusStartup(&token, &startup, nullptr) != Ok) return 1;
+
+    int result = 0;
+    try {
+        if (!fs::exists(exe_dir() / "data" / "family_data.json"))
+            throw std::runtime_error("Нет data/family_data.json рядом с FamilyTree.exe. Повторите сборку.");
+        model = std::make_unique<FamilyTree>();
+        uiFont = CreateFontW(-16, 0, 0, 0, FW_NORMAL, FALSE, FALSE, FALSE,
+                             DEFAULT_CHARSET, 0, 0, CLEARTYPE_QUALITY, 0, L"Segoe UI");
+        panelBrush = CreateSolidBrush(RGB(23, 34, 51));
+
+        WNDCLASSW c{};
+        c.hInstance = instance;
+        c.lpfnWndProc = CanvasProc;
+        c.lpszClassName = L"FamilyTreeCanvas";
+        c.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        if (!RegisterClassW(&c))
+            throw std::runtime_error("Не удалось создать класс области дерева.");
+
+        c.lpfnWndProc = DetailsProc;
+        c.lpszClassName = L"FamilyTreeDetails";
+        c.hbrBackground = nullptr;
+        c.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+        if (!RegisterClassW(&c))
+            throw std::runtime_error("Не удалось создать класс панели деталей.");
+
+        c.lpfnWndProc = MainProc;
+        c.lpszClassName = L"FamilyTreeMain";
+        c.hbrBackground = panelBrush;
+        c.hIcon = LoadIconW(nullptr, IDI_APPLICATION);
+        if (!RegisterClassW(&c))
+            throw std::runtime_error("Не удалось создать класс главного окна.");
+
+        HWND window = CreateWindowExW(0, c.lpszClassName, L"FamilyTree — семейная история",
+            WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN, CW_USEDEFAULT, CW_USEDEFAULT,
+            1450, 900, nullptr, nullptr, instance, nullptr);
+        if (!window) throw std::runtime_error("Не удалось открыть окно.");
+        ShowWindow(window, show); UpdateWindow(window); fit();
+
+        MSG message;
+        while (GetMessageW(&message, nullptr, 0, 0) > 0) {
+            if (message.message == WM_KEYDOWN) {
+                bool ctrl = (GetKeyState(VK_CONTROL) & 0x8000) != 0;
+                if (ctrl && message.wParam == 'F') {
+                    SetFocus(searchBox);
+                    SendMessageW(searchBox, EM_SETSEL, 0, -1);
+                    continue;
+                }
+                if (ctrl && message.wParam == 'E') {
+                    exportPng();
+                    continue;
+                }
+                if (ctrl && (message.wParam == '0' || message.wParam == VK_NUMPAD0)) {
+                    fit();
+                    continue;
+                }
+                if (message.wParam == VK_ESCAPE) {
+                    selected.clear();
+                    SetWindowTextW(searchBox, L"");
+                    filterList();
+                    InvalidateRect(canvas, nullptr, FALSE);
+                    InvalidateRect(detailBox, nullptr, FALSE);
+                    continue;
+                }
+            }
+            TranslateMessage(&message);
+            DispatchMessageW(&message);
+        }
+    } catch (const std::exception& e) {
+        MessageBoxW(nullptr, wide(e.what()).c_str(), L"FamilyTree — ошибка", MB_OK | MB_ICONERROR);
+        result = 1;
+    }
+
+    model.reset();
+    if (uiFont) DeleteObject(uiFont);
+    if (panelBrush) DeleteObject(panelBrush);
+    GdiplusShutdown(token);
+    return result;
+}

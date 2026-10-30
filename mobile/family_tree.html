@@ -1,0 +1,1070 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Семейное дерево</title>
+<script type="text/javascript" src="https://unpkg.com/vis-network/standalone/umd/vis-network.min.js"></script>
+<style>
+  html, body { height: 100%; margin: 0; background: #0D1420; color: #EAF0F8; font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden; }
+  #network { width: 100%; height: 100%; }
+  .header { position: absolute; top: 0; left: 0; right: 0; background: rgba(20, 30, 46, 0.9); padding: 12px 16px; display: flex; justify-content: space-between; align-items: center; z-index: 10; pointer-events: none; box-shadow: 0 2px 10px rgba(0,0,0,0.5); }
+  .header h1 { margin: 0; font-size: 18px; font-weight: 600; }
+  .footer { position: absolute; bottom: 0; left: 0; right: 0; background: rgba(20, 30, 46, 0.9); padding: 8px 16px; font-size: 13px; color: #A3B4CC; z-index: 10; text-align: center; pointer-events: none; }
+</style>
+</head>
+<body>
+<div class="header"><h1>Семейное дерево</h1><span id="stats"></span></div>
+<div id="network"></div>
+<div class="footer">Масштаб — двумя пальцами · Обзор — перетаскивание</div>
+
+<script>
+const familyData = {
+  "people": [
+    {
+      "id": "nabiulla",
+      "name": "Набиулла",
+      "sex": "M",
+      "generation": 0,
+      "branch": "paternal"
+    },
+    {
+      "id": "tabris",
+      "name": "Табрис",
+      "sex": "M",
+      "generation": 0,
+      "branch": "paternal"
+    },
+    {
+      "id": "zinatulla",
+      "name": "Зинатулла Набиуллин",
+      "sex": "M",
+      "generation": 1,
+      "branch": "paternal"
+    },
+    {
+      "id": "latifa",
+      "name": "Латифа Хазиева",
+      "sex": "F",
+      "generation": 1,
+      "branch": "paternal"
+    },
+    {
+      "id": "rabiga",
+      "name": "Рабига Батталова",
+      "sex": "F",
+      "generation": 2,
+      "branch": "paternal"
+    },
+    {
+      "id": "tukhvatulla",
+      "name": "Тухватулла Зинатуллин",
+      "sex": "M",
+      "generation": 2,
+      "branch": "paternal"
+    },
+    {
+      "id": "gilmuilla",
+      "name": "Гильмулла Зинатуллин",
+      "sex": "M",
+      "generation": 2,
+      "branch": "paternal"
+    },
+    {
+      "id": "sajida",
+      "name": "Саҗида Харисова",
+      "sex": "F",
+      "generation": 2,
+      "branch": "paternal"
+    },
+    {
+      "id": "mazhar",
+      "name": "Мазһар Зинатуллин",
+      "sex": "M",
+      "generation": 2,
+      "branch": "paternal"
+    },
+    {
+      "id": "mansur",
+      "name": "Мансур Зинатуллин",
+      "sex": "M",
+      "generation": 2,
+      "branch": "paternal",
+      "dates": "1897–1986"
+    },
+    {
+      "id": "mingnegayan",
+      "name": "Миңнегаян",
+      "sex": "F",
+      "generation": 2,
+      "branch": "paternal"
+    },
+    {
+      "id": "rifgat",
+      "name": "Рифгат Зинатуллин",
+      "sex": "M",
+      "generation": 3,
+      "branch": "paternal"
+    },
+    {
+      "id": "nailya_n",
+      "name": "Наиля Низамутдинова",
+      "sex": "F",
+      "generation": 3,
+      "branch": "paternal"
+    },
+    {
+      "id": "ashat",
+      "name": "Асхат Зинатуллин",
+      "sex": "M",
+      "generation": 3,
+      "branch": "paternal"
+    },
+    {
+      "id": "shamsemukhamat",
+      "name": "Шамсемухамат Баишев",
+      "sex": "M",
+      "generation": 1,
+      "branch": "maternal"
+    },
+    {
+      "id": "rakiya",
+      "name": "Ракия Мустафина",
+      "sex": "F",
+      "generation": 1,
+      "branch": "maternal"
+    },
+    {
+      "id": "shayakhmat",
+      "name": "Шаяхмат Баишев",
+      "sex": "M",
+      "generation": 1,
+      "branch": "maternal"
+    },
+    {
+      "id": "fariza",
+      "name": "Фариза Баишева",
+      "sex": "F",
+      "generation": 1,
+      "branch": "maternal"
+    },
+    {
+      "id": "rauza",
+      "name": "Рауза Баишева",
+      "sex": "F",
+      "generation": 2,
+      "branch": "maternal",
+      "dates": "1917–2007"
+    },
+    {
+      "id": "gabdelkhay",
+      "name": "Габделхай Баишев",
+      "sex": "M",
+      "generation": 2,
+      "branch": "maternal"
+    },
+    {
+      "id": "mazhit",
+      "name": "Мажит Баишев",
+      "sex": "M",
+      "generation": 2,
+      "branch": "maternal"
+    },
+    {
+      "id": "asma",
+      "name": "Асма Хаҗиева",
+      "sex": "F",
+      "generation": 2,
+      "branch": "maternal"
+    },
+    {
+      "id": "ibragim",
+      "name": "Ибрагим Баишев",
+      "sex": "M",
+      "generation": 2,
+      "branch": "maternal"
+    },
+    {
+      "id": "ismagil",
+      "name": "Исмагил Баишев",
+      "sex": "M",
+      "generation": 2,
+      "branch": "maternal"
+    },
+    {
+      "id": "gahadiya",
+      "name": "Гаһадия Баишева",
+      "sex": "F",
+      "generation": 2,
+      "branch": "maternal"
+    },
+    {
+      "id": "ilgiz",
+      "name": "Ильгиз",
+      "sex": "M",
+      "generation": 3,
+      "branch": "maternal"
+    },
+    {
+      "id": "kamil",
+      "name": "Камиль",
+      "sex": "M",
+      "generation": 2,
+      "branch": "maternal"
+    },
+    {
+      "id": "ramil_f",
+      "name": "Рамиль Фаризов",
+      "sex": "M",
+      "generation": 2,
+      "branch": "maternal"
+    },
+    {
+      "id": "zulfira",
+      "name": "Зульфира",
+      "sex": "F",
+      "generation": 2,
+      "branch": "maternal"
+    },
+    {
+      "id": "rufina_n",
+      "name": "Руфина Набиева",
+      "sex": "F",
+      "generation": 2,
+      "branch": "maternal"
+    },
+    {
+      "id": "khanif",
+      "name": "Ханиф Набиев",
+      "sex": "M",
+      "generation": 2,
+      "branch": "maternal"
+    },
+    {
+      "id": "ildar_n",
+      "name": "Ильдар Набиев",
+      "sex": "M",
+      "generation": 3,
+      "branch": "maternal"
+    },
+    {
+      "id": "irina_n",
+      "name": "Ирина Набиева",
+      "sex": "F",
+      "generation": 3,
+      "branch": "maternal"
+    },
+    {
+      "id": "zaynetdin",
+      "name": "Зайнетдин Фаттахов",
+      "sex": "M",
+      "generation": 2,
+      "branch": "maternal"
+    },
+    {
+      "id": "fanuza",
+      "name": "Фануза Фаттахова",
+      "sex": "F",
+      "generation": 3,
+      "branch": "maternal",
+      "dates": "1936–1957"
+    },
+    {
+      "id": "kashafetdin",
+      "name": "Кашафетдин Фаттахов",
+      "sex": "M",
+      "generation": 3,
+      "branch": "maternal",
+      "dates": "1938–2012"
+    },
+    {
+      "id": "nagima",
+      "name": "Нагима Мухарлямова",
+      "sex": "F",
+      "generation": 3,
+      "branch": "maternal"
+    },
+    {
+      "id": "raya",
+      "name": "Рая",
+      "sex": "F",
+      "generation": 3,
+      "branch": "maternal"
+    },
+    {
+      "id": "ratmir",
+      "name": "Ратмир Мухарлямов",
+      "sex": "M",
+      "generation": 4,
+      "branch": "maternal"
+    },
+    {
+      "id": "olga",
+      "name": "Ольга",
+      "sex": "F",
+      "generation": 4,
+      "branch": "maternal"
+    },
+    {
+      "id": "konstantin",
+      "name": "Константин Фаттахов",
+      "sex": "M",
+      "generation": 4,
+      "branch": "maternal"
+    },
+    {
+      "id": "grigory",
+      "name": "Григорий",
+      "sex": "M",
+      "generation": 5,
+      "branch": "maternal"
+    },
+    {
+      "id": "khaybrakhman",
+      "name": "Хайбрахман Хаҗиев",
+      "sex": "M",
+      "generation": 2,
+      "branch": "maternal"
+    },
+    {
+      "id": "zubarzhat",
+      "name": "Зубаржат Мухарямова",
+      "sex": "F",
+      "generation": 3,
+      "branch": "maternal"
+    },
+    {
+      "id": "rashit",
+      "name": "Рашит Хаҗиев",
+      "sex": "M",
+      "generation": 3,
+      "branch": "maternal"
+    },
+    {
+      "id": "ramil_kh",
+      "name": "Рамиль Хаҗиев",
+      "sex": "M",
+      "generation": 3,
+      "branch": "maternal"
+    },
+    {
+      "id": "ramazan",
+      "name": "Рамазан Мухарямов",
+      "sex": "M",
+      "generation": 3,
+      "branch": "maternal"
+    },
+    {
+      "id": "rufina_yu",
+      "name": "Руфина Юмагужина",
+      "sex": "F",
+      "generation": 4,
+      "branch": "maternal"
+    },
+    {
+      "id": "zulfiya_f",
+      "name": "Зульфия Феденькова",
+      "sex": "F",
+      "generation": 4,
+      "branch": "maternal"
+    },
+    {
+      "id": "liliya",
+      "name": "Лилия Мухарямова",
+      "sex": "F",
+      "generation": 4,
+      "branch": "maternal"
+    },
+    {
+      "id": "vil",
+      "name": "Виль Юмагужин",
+      "sex": "M",
+      "generation": 4,
+      "branch": "maternal"
+    },
+    {
+      "id": "albert",
+      "name": "Альберт Юмагужин",
+      "sex": "M",
+      "generation": 5,
+      "branch": "maternal"
+    },
+    {
+      "id": "airat",
+      "name": "Айрат Юмагужин",
+      "sex": "M",
+      "generation": 5,
+      "branch": "maternal"
+    },
+    {
+      "id": "muzh_fed",
+      "name": "Муж Феденьков",
+      "sex": "M",
+      "generation": 4,
+      "branch": "maternal"
+    },
+    {
+      "id": "ruslan_f",
+      "name": "Руслан Феденьков",
+      "sex": "M",
+      "generation": 5,
+      "branch": "maternal"
+    },
+    {
+      "id": "ramilya",
+      "name": "Рамиля",
+      "sex": "F",
+      "generation": 3,
+      "branch": "maternal"
+    },
+    {
+      "id": "banat",
+      "name": "Банат",
+      "sex": "F",
+      "generation": 3,
+      "branch": "maternal"
+    },
+    {
+      "id": "alishera",
+      "name": "Алишер Хаҗиев",
+      "sex": "M",
+      "generation": 4,
+      "branch": "maternal"
+    },
+    {
+      "id": "rozaliya",
+      "name": "Розалия",
+      "sex": "F",
+      "generation": 3,
+      "branch": "maternal"
+    },
+    {
+      "id": "timur",
+      "name": "Тимур Хаҗиев",
+      "sex": "M",
+      "generation": 4,
+      "branch": "maternal"
+    },
+    {
+      "id": "gadelya",
+      "name": "Гаделя Хаҗиева",
+      "sex": "F",
+      "generation": 4,
+      "branch": "maternal"
+    },
+    {
+      "id": "arslan",
+      "name": "Арслан",
+      "sex": "M",
+      "generation": 5,
+      "branch": "maternal"
+    },
+    {
+      "id": "maiya",
+      "name": "Майя",
+      "sex": "F",
+      "generation": 5,
+      "branch": "maternal"
+    },
+    {
+      "id": "venera",
+      "name": "Венера Шабанова",
+      "sex": "F",
+      "generation": 3,
+      "branch": "center",
+      "maiden": "Зинатуллина"
+    },
+    {
+      "id": "rim",
+      "name": "Рим Шабанов",
+      "sex": "M",
+      "generation": 3,
+      "branch": "center",
+      "dates": "1939–2004"
+    },
+    {
+      "id": "dinar",
+      "name": "Динар Шабанов",
+      "sex": "M",
+      "generation": 4,
+      "branch": "center",
+      "dates": "р. 1968"
+    },
+    {
+      "id": "ruslan",
+      "name": "Руслан Шабанов",
+      "sex": "M",
+      "generation": 4,
+      "branch": "center",
+      "dates": "р. 1983"
+    },
+    {
+      "id": "alina",
+      "name": "Алина Руслякова",
+      "sex": "F",
+      "generation": 5,
+      "branch": "center",
+      "dates": "р. 1992"
+    },
+    {
+      "id": "marat",
+      "name": "Марат Шабанов",
+      "sex": "M",
+      "generation": 5,
+      "branch": "center",
+      "dates": "р. 2005"
+    }
+  ],
+  "relations": [
+    {
+      "type": "parent",
+      "source": "nabiulla",
+      "target": "zinatulla"
+    },
+    {
+      "type": "parent",
+      "source": "tabris",
+      "target": "latifa"
+    },
+    {
+      "type": "marriage",
+      "source": "zinatulla",
+      "target": "latifa"
+    },
+    {
+      "type": "parent",
+      "source": "zinatulla",
+      "target": "rabiga"
+    },
+    {
+      "type": "parent",
+      "source": "latifa",
+      "target": "rabiga"
+    },
+    {
+      "type": "parent",
+      "source": "zinatulla",
+      "target": "tukhvatulla"
+    },
+    {
+      "type": "parent",
+      "source": "latifa",
+      "target": "tukhvatulla"
+    },
+    {
+      "type": "parent",
+      "source": "zinatulla",
+      "target": "gilmuilla"
+    },
+    {
+      "type": "parent",
+      "source": "latifa",
+      "target": "gilmuilla"
+    },
+    {
+      "type": "parent",
+      "source": "zinatulla",
+      "target": "sajida"
+    },
+    {
+      "type": "parent",
+      "source": "latifa",
+      "target": "sajida"
+    },
+    {
+      "type": "parent",
+      "source": "zinatulla",
+      "target": "mazhar"
+    },
+    {
+      "type": "parent",
+      "source": "latifa",
+      "target": "mazhar"
+    },
+    {
+      "type": "parent",
+      "source": "zinatulla",
+      "target": "mansur"
+    },
+    {
+      "type": "parent",
+      "source": "latifa",
+      "target": "mansur"
+    },
+    {
+      "type": "marriage",
+      "source": "mansur",
+      "target": "mingnegayan"
+    },
+    {
+      "type": "parent",
+      "source": "mansur",
+      "target": "rifgat"
+    },
+    {
+      "type": "parent",
+      "source": "mingnegayan",
+      "target": "rifgat"
+    },
+    {
+      "type": "parent",
+      "source": "mansur",
+      "target": "nailya_n"
+    },
+    {
+      "type": "parent",
+      "source": "mingnegayan",
+      "target": "nailya_n"
+    },
+    {
+      "type": "parent",
+      "source": "mansur",
+      "target": "ashat"
+    },
+    {
+      "type": "parent",
+      "source": "mingnegayan",
+      "target": "ashat"
+    },
+    {
+      "type": "marriage",
+      "source": "shamsemukhamat",
+      "target": "rakiya"
+    },
+    {
+      "type": "parent",
+      "source": "shamsemukhamat",
+      "target": "rauza"
+    },
+    {
+      "type": "parent",
+      "source": "rakiya",
+      "target": "rauza"
+    },
+    {
+      "type": "parent",
+      "source": "shamsemukhamat",
+      "target": "gabdelkhay"
+    },
+    {
+      "type": "parent",
+      "source": "rakiya",
+      "target": "gabdelkhay"
+    },
+    {
+      "type": "parent",
+      "source": "shamsemukhamat",
+      "target": "mazhit"
+    },
+    {
+      "type": "parent",
+      "source": "rakiya",
+      "target": "mazhit"
+    },
+    {
+      "type": "parent",
+      "source": "shamsemukhamat",
+      "target": "asma"
+    },
+    {
+      "type": "parent",
+      "source": "rakiya",
+      "target": "asma"
+    },
+    {
+      "type": "parent",
+      "source": "shayakhmat",
+      "target": "ibragim"
+    },
+    {
+      "type": "parent",
+      "source": "shayakhmat",
+      "target": "ismagil"
+    },
+    {
+      "type": "parent",
+      "source": "shayakhmat",
+      "target": "gahadiya"
+    },
+    {
+      "type": "parent",
+      "source": "gahadiya",
+      "target": "ilgiz"
+    },
+    {
+      "type": "parent",
+      "source": "fariza",
+      "target": "kamil"
+    },
+    {
+      "type": "parent",
+      "source": "fariza",
+      "target": "ramil_f"
+    },
+    {
+      "type": "parent",
+      "source": "fariza",
+      "target": "zulfira"
+    },
+    {
+      "type": "parent",
+      "source": "fariza",
+      "target": "rufina_n"
+    },
+    {
+      "type": "marriage",
+      "source": "rufina_n",
+      "target": "khanif"
+    },
+    {
+      "type": "parent",
+      "source": "rufina_n",
+      "target": "ildar_n"
+    },
+    {
+      "type": "parent",
+      "source": "khanif",
+      "target": "ildar_n"
+    },
+    {
+      "type": "parent",
+      "source": "rufina_n",
+      "target": "irina_n"
+    },
+    {
+      "type": "parent",
+      "source": "khanif",
+      "target": "irina_n"
+    },
+    {
+      "type": "marriage",
+      "source": "rauza",
+      "target": "zaynetdin"
+    },
+    {
+      "type": "parent",
+      "source": "rauza",
+      "target": "fanuza"
+    },
+    {
+      "type": "parent",
+      "source": "zaynetdin",
+      "target": "fanuza"
+    },
+    {
+      "type": "parent",
+      "source": "rauza",
+      "target": "kashafetdin"
+    },
+    {
+      "type": "parent",
+      "source": "zaynetdin",
+      "target": "kashafetdin"
+    },
+    {
+      "type": "marriage",
+      "source": "kashafetdin",
+      "target": "nagima"
+    },
+    {
+      "type": "marriage",
+      "source": "kashafetdin",
+      "target": "raya"
+    },
+    {
+      "type": "parent",
+      "source": "kashafetdin",
+      "target": "ratmir"
+    },
+    {
+      "type": "parent",
+      "source": "nagima",
+      "target": "ratmir"
+    },
+    {
+      "type": "parent",
+      "source": "kashafetdin",
+      "target": "olga"
+    },
+    {
+      "type": "parent",
+      "source": "raya",
+      "target": "olga"
+    },
+    {
+      "type": "parent",
+      "source": "kashafetdin",
+      "target": "konstantin"
+    },
+    {
+      "type": "parent",
+      "source": "raya",
+      "target": "konstantin"
+    },
+    {
+      "type": "parent",
+      "source": "olga",
+      "target": "grigory"
+    },
+    {
+      "type": "marriage",
+      "source": "asma",
+      "target": "khaybrakhman"
+    },
+    {
+      "type": "parent",
+      "source": "asma",
+      "target": "zubarzhat"
+    },
+    {
+      "type": "parent",
+      "source": "khaybrakhman",
+      "target": "zubarzhat"
+    },
+    {
+      "type": "parent",
+      "source": "asma",
+      "target": "rashit"
+    },
+    {
+      "type": "parent",
+      "source": "khaybrakhman",
+      "target": "rashit"
+    },
+    {
+      "type": "parent",
+      "source": "asma",
+      "target": "ramil_kh"
+    },
+    {
+      "type": "parent",
+      "source": "khaybrakhman",
+      "target": "ramil_kh"
+    },
+    {
+      "type": "marriage",
+      "source": "zubarzhat",
+      "target": "ramazan"
+    },
+    {
+      "type": "parent",
+      "source": "zubarzhat",
+      "target": "rufina_yu"
+    },
+    {
+      "type": "parent",
+      "source": "ramazan",
+      "target": "rufina_yu"
+    },
+    {
+      "type": "parent",
+      "source": "zubarzhat",
+      "target": "zulfiya_f"
+    },
+    {
+      "type": "parent",
+      "source": "ramazan",
+      "target": "zulfiya_f"
+    },
+    {
+      "type": "parent",
+      "source": "zubarzhat",
+      "target": "liliya"
+    },
+    {
+      "type": "parent",
+      "source": "ramazan",
+      "target": "liliya"
+    },
+    {
+      "type": "marriage",
+      "source": "rufina_yu",
+      "target": "vil"
+    },
+    {
+      "type": "parent",
+      "source": "rufina_yu",
+      "target": "albert"
+    },
+    {
+      "type": "parent",
+      "source": "vil",
+      "target": "albert"
+    },
+    {
+      "type": "parent",
+      "source": "rufina_yu",
+      "target": "airat"
+    },
+    {
+      "type": "parent",
+      "source": "vil",
+      "target": "airat"
+    },
+    {
+      "type": "marriage",
+      "source": "zulfiya_f",
+      "target": "muzh_fed"
+    },
+    {
+      "type": "parent",
+      "source": "zulfiya_f",
+      "target": "ruslan_f"
+    },
+    {
+      "type": "parent",
+      "source": "muzh_fed",
+      "target": "ruslan_f"
+    },
+    {
+      "type": "marriage",
+      "source": "rashit",
+      "target": "ramilya"
+    },
+    {
+      "type": "marriage",
+      "source": "rashit",
+      "target": "banat"
+    },
+    {
+      "type": "parent",
+      "source": "rashit",
+      "target": "alishera"
+    },
+    {
+      "type": "parent",
+      "source": "ramilya",
+      "target": "alishera"
+    },
+    {
+      "type": "marriage",
+      "source": "ramil_kh",
+      "target": "rozaliya"
+    },
+    {
+      "type": "parent",
+      "source": "ramil_kh",
+      "target": "timur"
+    },
+    {
+      "type": "parent",
+      "source": "rozaliya",
+      "target": "timur"
+    },
+    {
+      "type": "parent",
+      "source": "ramil_kh",
+      "target": "gadelya"
+    },
+    {
+      "type": "parent",
+      "source": "rozaliya",
+      "target": "gadelya"
+    },
+    {
+      "type": "parent",
+      "source": "gadelya",
+      "target": "arslan"
+    },
+    {
+      "type": "parent",
+      "source": "gadelya",
+      "target": "maiya"
+    },
+    {
+      "type": "marriage",
+      "source": "mansur",
+      "target": "rauza"
+    },
+    {
+      "type": "parent",
+      "source": "mansur",
+      "target": "venera"
+    },
+    {
+      "type": "parent",
+      "source": "rauza",
+      "target": "venera"
+    },
+    {
+      "type": "marriage",
+      "source": "venera",
+      "target": "rim"
+    },
+    {
+      "type": "parent",
+      "source": "venera",
+      "target": "dinar"
+    },
+    {
+      "type": "parent",
+      "source": "rim",
+      "target": "dinar"
+    },
+    {
+      "type": "parent",
+      "source": "venera",
+      "target": "ruslan"
+    },
+    {
+      "type": "parent",
+      "source": "rim",
+      "target": "ruslan"
+    },
+    {
+      "type": "parent",
+      "source": "dinar",
+      "target": "alina"
+    },
+    {
+      "type": "parent",
+      "source": "ruslan",
+      "target": "marat"
+    }
+  ]
+};
+
+const nodes = familyData.people.map(p => ({
+  id: p.id,
+  label: p.name,
+  level: p.generation,
+  color: {
+    background: p.id === 'venera' ? '#E9BD5A' : (p.sex === 'F' ? '#ED9FC1' : '#6FB1F2'),
+    border: '#1E2C42'
+  },
+  font: { color: '#1B283B', bold: true, size: 14 },
+  shape: 'box',
+  margin: 10,
+  widthConstraint: 160
+}));
+
+const edges = familyData.relations.map(r => ({
+  from: r.source,
+  to: r.target,
+  arrows: r.type === 'parent' ? 'to' : '',
+  dashes: r.type === 'marriage',
+  color: r.type === 'parent' ? '#677C99' : (r.type === 'marriage' ? '#ED9FC1' : '#859AB7')
+}));
+
+const container = document.getElementById('network');
+const data = { nodes: new vis.DataSet(nodes), edges: new vis.DataSet(edges) };
+const options = {
+  layout: {
+    hierarchical: {
+      direction: 'UD',
+      sortMethod: 'directed',
+      levelSeparation: 130,
+      nodeSpacing: 200
+    }
+  },
+  physics: false,
+  interaction: { dragNodes: true, dragView: true, zoomView: true }
+};
+const network = new vis.Network(container, data, options);
+
+document.getElementById('stats').textContent = familyData.people.length + ' персон';
+</script>
+</body>
+</html>
