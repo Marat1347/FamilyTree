@@ -31,14 +31,12 @@ html = r"""<!DOCTYPE html>
   :root {
     --bg: #0D1420; --panel: #172233; --surface: rgba(23, 34, 51, 0.95);
     --text: #EAF0F8; --muted: #A3B4CC; --male: #6FB1F2; --female: #ED9FC1;
-    --gold: #E9BD5A; --path: #34D399; --card-top: #243349; --card-bottom: #1B283B;
-    --border: rgba(255,255,255,0.1);
+    --gold: #E9BD5A; --path: #34D399; --border: rgba(255,255,255,0.1);
   }
   body.light-theme {
     --bg: #F5F2EB; --panel: #EAE4D7; --surface: rgba(234, 228, 215, 0.95);
     --text: #1E293B; --muted: #64748B; --male: #2563EB; --female: #DB2777;
-    --gold: #B46E0C; --path: #059669; --card-top: #FFFFFF; --card-bottom: #F0ECE1;
-    --border: rgba(0,0,0,0.1);
+    --gold: #B46E0C; --path: #059669; --border: rgba(0,0,0,0.1);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: var(--bg); color: var(--text);
@@ -193,102 +191,59 @@ let pathEdges = new Set();
 let pathPickSourceId = null;
 
 const palettes = {
-  dark: { bg: '#0D1420', panel: '#172233', surface: 'rgba(23,34,51,0.95)', text: '#EAF0F8', muted: '#A3B4CC', male: '#6FB1F2', female: '#ED9FC1', gold: '#E9BD5A', path: '#34D399', cardTop: '#243349', cardBottom: '#1B283B' },
-  light: { bg: '#F5F2EB', panel: '#EAE4D7', surface: 'rgba(234,228,215,0.95)', text: '#1E293B', muted: '#64748B', male: '#2563EB', female: '#DB2777', gold: '#B46E0C', path: '#059669', cardTop: '#FFFFFF', cardBottom: '#F0ECE1' }
+  dark: { bg: '#0D1420', panel: '#172233', surface: 'rgba(23,34,51,0.95)', text: '#EAF0F8', muted: '#A3B4CC', male: '#6FB1F2', female: '#ED9FC1', gold: '#E9BD5A', path: '#34D399' },
+  light: { bg: '#F5F2EB', panel: '#EAE4D7', surface: 'rgba(234,228,215,0.95)', text: '#1E293B', muted: '#64748B', male: '#2563EB', female: '#DB2777', gold: '#B46E0C', path: '#059669' }
 };
 let currentPalette = palettes.dark;
 
 const container = document.getElementById('network');
 const options = {
-  layout: { hierarchical: { direction: 'UD', sortMethod: 'directed', levelSeparation: 155, nodeSpacing: 175, treeSpacing: 210 } },
+  layout: {
+    hierarchical: {
+      direction: 'UD', sortMethod: 'directed',
+      levelSeparation: 160, nodeSpacing: 180, treeSpacing: 220,
+      blockShifting: true, edgeMinimization: true
+    }
+  },
   physics: false,
   interaction: { dragNodes: false, dragView: true, zoomView: true },
-  nodes: { shape: 'custom', borderWidth: 0, color: { background: 'transparent', border: 'transparent' }, shadow: { enabled: true, color: 'rgba(0,0,0,0.35)', size: 8, x: 0, y: 4 } },
-  edges: { smooth: { type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.45 }, width: 1.8 }
+  nodes: { shape: 'box', borderWidth: 2, margin: { top: 10, bottom: 10, left: 14, right: 14 } },
+  edges: { smooth: { type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.4 }, width: 1.8 }
 };
 
 function getNodeConfig(p) {
-  const accent = p.id === 'venera' ? currentPalette.gold : (p.sex === 'F' ? currentPalette.female : currentPalette.male);
   const isSelected = selectedId === p.id;
   const inPath = pathNodes.has(p.id);
   const query = document.getElementById('search').value.toLowerCase().trim();
   const isSearchMatch = query && p.name.toLowerCase().includes(query);
   const isDimmed = (query && !isSearchMatch) || (pathNodes.size > 0 && !inPath);
 
-  // ЖЁСТКИЕ РАЗМЕРЫ для идеального лэйаута
-  const W = 160, H = 64;
+  const accent = p.id === 'venera' ? currentPalette.gold : (p.sex === 'F' ? currentPalette.female : currentPalette.male);
+  const bg = p.id === 'venera' ? currentPalette.gold : (p.sex === 'F' ? currentPalette.female : currentPalette.male);
+  
+  let label = p.name;
+  if (p.id === 'venera') label += ' ★';
+  let sub = [];
+  if (p.maiden) sub.push('ур. ' + p.maiden);
+  if (p.dates) sub.push(p.dates);
+  if (sub.length > 0) label += '\n' + sub.join(' · ');
 
   return {
-    id: p.id,
-    level: p.generation,
-    widthConstraint: { minimum: W, maximum: W },
-    heightConstraint: { minimum: H, maximum: H },
-    opacity: isDimmed ? 0.25 : 1.0,
-    ctxRenderer: function({ ctx, id, x, y, state }) {
-      const left = x - W / 2, top = y - H / 2;
-      
-      // Градиент фона
-      const grad = ctx.createLinearGradient(0, top, 0, top + H);
-      grad.addColorStop(0, currentPalette.cardTop);
-      grad.addColorStop(1, currentPalette.cardBottom);
-
-      // Скругленный прямоугольник
-      ctx.beginPath();
-      ctx.moveTo(left + 12, top);
-      ctx.lineTo(left + W - 12, top);
-      ctx.quadraticCurveTo(left + W, top, left + W, top + 12);
-      ctx.lineTo(left + W, top + H - 12);
-      ctx.quadraticCurveTo(left + W, top + H, left + W - 12, top + H);
-      ctx.lineTo(left + 12, top + H);
-      ctx.quadraticCurveTo(left, top + H, left, top + H - 12);
-      ctx.lineTo(left, top + 12);
-      ctx.quadraticCurveTo(left, top, left + 12, top);
-      ctx.closePath();
-
-      ctx.fillStyle = grad;
-      ctx.fill();
-      
-      const borderColor = inPath ? currentPalette.path : (isSearchMatch ? '#F59E0B' : (isSelected ? accent : currentPalette.cardBottom));
-      ctx.lineWidth = isSelected || inPath || isSearchMatch ? 3 : 1.5;
-      ctx.strokeStyle = borderColor;
-      ctx.stroke();
-
-      // Акцентная точка
-      ctx.beginPath();
-      ctx.arc(left + 16, top + 16, 4, 0, Math.PI * 2);
-      ctx.fillStyle = accent;
-      ctx.fill();
-
-      // Текст
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.fillStyle = currentPalette.text;
-      
-      // Имя
-      ctx.font = 'bold 14px "Segoe UI", sans-serif';
-      let name = p.name;
-      if (name.length > 20) name = name.substring(0, 18) + '...';
-      ctx.fillText(name, x, y - 8);
-
-      // Годы / фамилия
-      ctx.font = '11px "Segoe UI", sans-serif';
-      ctx.fillStyle = currentPalette.muted;
-      let sub = [];
-      if (p.maiden) sub.push(`ур. ${p.maiden}`);
-      if (p.dates) sub.push(p.dates);
-      ctx.fillText(sub.join(' · '), x, y + 10);
-
-      if (p.id === 'venera') {
-        ctx.font = 'bold 10px "Segoe UI", sans-serif';
-        ctx.fillStyle = currentPalette.gold;
-        ctx.fillText('★ ЦЕНТР', x, y + 24);
-      }
-
-      return { drawExternalLabels: null };
+    id: p.id, label: label, level: p.generation,
+    color: {
+      background: bg,
+      border: inPath ? currentPalette.path : (isSearchMatch ? '#F59E0B' : (isSelected ? '#FFFFFF' : accent))
     },
-    nodeDimensions: function(ctx) {
-      return { width: 160, height: 64 };
-    }
+    font: {
+      color: '#1B283B', // Тёмный текст для контраста с ярким фоном
+      bold: { color: '#1B283B' },
+      size: 13,
+      face: 'Segoe UI',
+      multi: 'html' // Включаем поддержку HTML для переноса строк (в vis-network это безопасно для \n)
+    },
+    borderWidth: (inPath || isSearchMatch || isSelected || p.id === 'venera') ? 3 : 1.5,
+    opacity: isDimmed ? 0.25 : 1.0,
+    widthConstraint: { minimum: 130, maximum: 170 }
   };
 }
 
@@ -470,13 +425,13 @@ function focusPerson(id) {
   showPanel(id);
 }
 
-// --- PNG (ТУТ БЕЗ ИЗМЕНЕНИЙ) ---
 function nextDraw(net) {
   return new Promise((resolve, reject) => {
     let to; net.once('afterDrawing', () => { clearTimeout(to); resolve(); });
     to = setTimeout(() => reject(new Error('Таймаут')), 6000); net.redraw();
   });
 }
+
 async function exportPNG() {
   toast('Готовлю PNG...', 1500); await document.fonts.ready;
   const host = document.createElement('div'); const dpr = window.devicePixelRatio || 1;
@@ -526,4 +481,4 @@ html = html.replace("__JSON_DATA__", json_str)
 os.makedirs(MOBILE_DIR, exist_ok=True)
 with open(os.path.join(MOBILE_DIR, "family_tree.html"), 'w', encoding='utf-8') as f:
     f.write(html)
-print("✅ family_tree.html обновлён (фикс размеров карточек)")
+print("✅ family_tree.html обновлён (стандартные карточки с текстом и новыми фичами)")
