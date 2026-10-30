@@ -35,12 +35,13 @@ html = r"""<!DOCTYPE html>
   }
   body.light-theme {
     --bg: #F5F2EB; --panel: #EAE4D7; --surface: rgba(234, 228, 215, 0.95);
-    --text: #1E293B; --muted: #64748B; --male: #2563EB; --female: #DB2777;
-    --gold: #B46E0C; --path: #059669; --border: rgba(0,0,0,0.1);
+    --text: #1E293B; --muted: #64748B; --male: #8FB3D9; --female: #EBA7BE;
+    --gold: #D4A359; --path: #059669; --border: rgba(0,0,0,0.1);
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: var(--bg); color: var(--text);
-    font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden; }
+    font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden;
+    transition: background 0.3s, color 0.3s; }
   #network { width: 100%; height: 100%; }
 
   .header {
@@ -49,6 +50,7 @@ html = r"""<!DOCTYPE html>
     display: flex; flex-direction: column; gap: 10px; z-index: 10;
     box-shadow: 0 4px 15px rgba(0,0,0,0.2);
     border-bottom-left-radius: 16px; border-bottom-right-radius: 16px;
+    backdrop-filter: blur(10px);
   }
   .header h1 { font-size: 18px; font-weight: 600;
     display: flex; justify-content: space-between; align-items: center; }
@@ -188,9 +190,18 @@ let pathNodes = new Set();
 let pathEdges = new Set();
 let pathPickSourceId = null;
 
+// Обновленная палитра
 const palettes = {
-  dark: { bg: '#0D1420', panel: '#172233', surface: 'rgba(23,34,51,0.95)', text: '#EAF0F8', muted: '#A3B4CC', male: '#6FB1F2', female: '#ED9FC1', gold: '#E9BD5A', path: '#34D399' },
-  light: { bg: '#F5F2EB', panel: '#EAE4D7', surface: 'rgba(234,228,215,0.95)', text: '#1E293B', muted: '#64748B', male: '#2563EB', female: '#DB2777', gold: '#B46E0C', path: '#059669' }
+  dark: { 
+    bg: '#0D1420', panel: '#172233', surface: 'rgba(23,34,51,0.95)', 
+    text: '#EAF0F8', muted: '#A3B4CC', 
+    male: '#6FB1F2', female: '#ED9FC1', gold: '#E9BD5A', path: '#34D399' 
+  },
+  light: { 
+    bg: '#F5F2EB', panel: '#EAE4D7', surface: 'rgba(234,228,215,0.95)', 
+    text: '#1E293B', muted: '#64748B', 
+    male: '#8FB3D9', female: '#EBA7BE', gold: '#D4A359', path: '#059669' 
+  }
 };
 let currentPalette = palettes.dark;
 
@@ -233,12 +244,15 @@ function getNodeConfig(p) {
   if (p.dates) sub.push(p.dates);
   if (sub.length > 0) label += '\n' + sub.join(' · ');
 
+  // В светлой теме белая рамка не видна, поэтому используем темную для выделения
+  let borderCol = accent;
+  if (isSelected) borderCol = isLightTheme ? '#334155' : '#FFFFFF';
+  if (isSearchMatch) borderCol = '#F59E0B';
+  if (inPath) borderCol = currentPalette.path;
+
   return {
     id: p.id, label: label, level: p.generation,
-    color: {
-      background: bg,
-      border: inPath ? currentPalette.path : (isSearchMatch ? '#F59E0B' : (isSelected ? '#FFFFFF' : accent))
-    },
+    color: { background: bg, border: borderCol },
     borderWidth: (inPath || isSearchMatch || isSelected || p.id === 'venera') ? 3 : 1.5,
     opacity: isDimmed ? 0.25 : 1.0
   };
@@ -478,4 +492,4 @@ html = html.replace("__JSON_DATA__", json_str)
 os.makedirs(MOBILE_DIR, exist_ok=True)
 with open(os.path.join(MOBILE_DIR, "family_tree.html"), 'w', encoding='utf-8') as f:
     f.write(html)
-print("✅ family_tree.html создан: " + os.path.join(MOBILE_DIR, "family_tree.html"))
+print("✅ family_tree.html создан (мягкая светлая тема)")
