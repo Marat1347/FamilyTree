@@ -40,10 +40,10 @@ html = r"""<!DOCTYPE html>
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
   html, body { height: 100%; background: var(--bg); color: var(--text);
-    font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden; }
+    font-family: 'Segoe UI', Arial, sans-serif; overflow: hidden;
+    transition: background 0.2s, color 0.2s; }
   #network { width: 100%; height: 100%; }
 
-  /* Спиннер загрузки */
   #spinner {
     position: absolute; top: 50%; left: 50%;
     transform: translate(-50%, -50%);
@@ -210,49 +210,58 @@ let pathNodes = new Set();
 let pathEdges = new Set();
 let pathPickSourceId = null;
 let adjacencyCache = null;
+let themeLock = false;
 
+// 🔥 Палитры с учётом цветов рёбер
 const palettes = {
-  dark: { bg: '#0D1420', panel: '#172233', surface: 'rgba(23,34,51,0.95)', text: '#EAF0F8', muted: '#A3B4CC', male: '#6FB1F2', female: '#ED9FC1', gold: '#E9BD5A', path: '#34D399' },
-  light: { bg: '#F5F2EB', panel: '#EAE4D7', surface: 'rgba(234,228,215,0.95)', text: '#1E293B', muted: '#64748B', male: '#8FB3D9', female: '#EBA7BE', gold: '#D4A359', path: '#059669' }
+  dark: {
+    bg: '#0D1420', panel: '#172233', surface: 'rgba(23,34,51,0.95)',
+    text: '#EAF0F8', muted: '#A3B4CC',
+    male: '#6FB1F2', female: '#ED9FC1', gold: '#E9BD5A',
+    path: '#34D399',
+    edgeParent: '#677C99', edgeMarriage: '#ED9FC1', edgeSibling: '#859AB7'
+  },
+  light: {
+    bg: '#F5F2EB', panel: '#EAE4D7', surface: 'rgba(234,228,215,0.95)',
+    text: '#1E293B', muted: '#64748B',
+    male: '#8FB3D9', female: '#EBA7BE', gold: '#D4A359',
+    path: '#059669',
+    edgeParent: '#8497B2', edgeMarriage: '#EBA7BE', edgeSibling: '#8FA5C0'
+  }
 };
 let currentPalette = palettes.dark;
 
 const container = document.getElementById('network');
 
-// ============================================================
-// ОПТИМИЗИРОВАННЫЕ ОПЦИИ
-// ============================================================
 const options = {
   layout: {
-    improvedLayout: false,      // 🔥 ОТКЛЮЧЕНО: иначе >100 узлов тормозит
+    improvedLayout: false,
     hierarchical: {
-      direction: 'UD',
-      sortMethod: 'directed',
-      levelSeparation: 150,
-      nodeSpacing: 160,
-      treeSpacing: 200,
-      blockShifting: false,     // 🔥 ОТКЛЮЧЕНО: тяжёлая эвристика
-      edgeMinimization: false   // 🔥 ОТКЛЮЧЕНО: тяжёлая эвристика
+      direction: 'UD', sortMethod: 'directed',
+      levelSeparation: 150, nodeSpacing: 160, treeSpacing: 200,
+      blockShifting: false, edgeMinimization: false
     }
   },
   physics: false,
   interaction: {
-    dragNodes: false,
-    dragView: true,
-    zoomView: true,
-    hover: false,
-    hideEdgesOnDrag: true,      // 🔥 Не рисуем рёбра при перетаскивании
-    hideEdgesOnZoom: true       // 🔥 Не рисуем рёбра при зуме
+    dragNodes: false, dragView: true, zoomView: true, hover: false,
+    hideEdgesOnDrag: true, hideEdgesOnZoom: true
   },
   nodes: {
     shape: 'box',
-    borderWidth: 2,
+    borderWidth: 1.5,
+    borderWidthSelected: 3,
     margin: { top: 8, bottom: 8, left: 12, right: 12 },
     font: { color: '#1B283B', bold: true, size: 12, face: 'Segoe UI' }
   },
   edges: {
     smooth: { type: 'cubicBezier', forceDirection: 'vertical', roundness: 0.35 },
     width: 1.5
+  },
+  groups: {
+    male:   { color: { background: '#6FB1F2', border: '#6FB1F2' }, font: { color: '#1B283B' } },
+    female: { color: { background: '#ED9FC1', border: '#ED9FC1' }, font: { color: '#1B283B' } },
+    center: { color: { background: '#E9BD5A', border: '#E9BD5A' }, font: { color: '#1B283B' } }
   }
 };
 
@@ -264,36 +273,35 @@ function toast(msg, duration) {
 }
 
 // ============================================================
-// ПОСТРОЕНИЕ КЭША УЗЛОВ (ОДИН РАЗ)
+// КЭШ УЗЛОВ (без color — цвет идёт от группы)
 // ============================================================
 function buildNodeData(p) {
-  const accent = p.id === 'venera' ? currentPalette.gold : (p.sex === 'F' ? currentPalette.female : currentPalette.male);
   let label = p.name;
   if (p.id === 'venera') label += ' ★';
   let sub = [];
   if (p.maiden) sub.push('ур. ' + p.maiden);
   if (p.dates) sub.push(p.dates);
   if (sub.length > 0) label += '\n' + sub.join(' · ');
-  
+
   return {
     id: p.id,
     label: label,
     level: p.generation,
-    color: { background: accent, border: accent },
-    borderWidth: 1.5,
-    opacity: 1.0
+    group: p.id === 'venera' ? 'center' : (p.sex === 'F' ? 'female' : 'male')
   };
 }
 
 function buildEdgeData(r, index) {
   const isMarriage = r.type === 'marriage';
+  const color = r.type === 'parent' ? '#677C99'
+              : (isMarriage ? '#ED9FC1' : '#859AB7');
   return {
     id: 'e_' + index,
     from: r.source,
     to: r.target,
     arrows: r.type === 'parent' ? { to: { enabled: true, scaleFactor: 0.5 } } : '',
     dashes: isMarriage,
-    color: r.type === 'parent' ? '#677C99' : (isMarriage ? '#ED9FC1' : '#859AB7'),
+    color: color,
     width: isMarriage ? 2 : 1.5
   };
 }
@@ -310,56 +318,49 @@ function buildAdjacency() {
 }
 
 // ============================================================
-// РЕНДЕР (только обновление свойств, без пересоздания)
+// ФИЛЬТР ПОИСКА + ВЕТВИ (обновляет свойства узлов)
 // ============================================================
 function renderGraph() {
+  if (!nodesDS) return;
   const query = document.getElementById('search').value.toLowerCase().trim();
   const visible = {};
-  let visibleCount = 0;
-  
-  // 1. Определяем видимость
+  let count = 0;
+
+  // Видимость
   familyData.people.forEach(p => {
     const show = (currentBranch === 'all' || p.branch === currentBranch) &&
                  (!query || p.name.toLowerCase().includes(query));
     visible[p.id] = show;
-    if (show) visibleCount++;
+    if (show) count++;
   });
-  
-  // 2. Обновляем узлы одним пакетом
+
+  // Узлы
   const nodeUpdates = [];
   familyData.people.forEach(p => {
-    const isSelected = selectedId === p.id;
     const inPath = pathNodes.has(p.id);
     const isSearchMatch = query && p.name.toLowerCase().includes(query);
-    const isDimmed = query && !isSearchMatch;
-    
-    const accent = p.id === 'venera' ? currentPalette.gold : (p.sex === 'F' ? currentPalette.female : currentPalette.male);
-    let border = accent;
-    if (isSelected) border = isLightTheme ? '#334155' : '#FFFFFF';
-    if (isSearchMatch) border = '#F59E0B';
-    if (inPath) border = currentPalette.path;
-    
+    const isDimmed = (query && !isSearchMatch) || (pathNodes.size > 0 && !inPath);
+    let borderWidth = 1.5;
+    if (inPath || isSearchMatch || p.id === 'venera') borderWidth = 3;
     nodeUpdates.push({
       id: p.id,
       hidden: !visible[p.id],
-      opacity: isDimmed ? 0.25 : 1.0,
-      color: { background: accent, border: border },
-      borderWidth: (inPath || isSearchMatch || isSelected || p.id === 'venera') ? 3 : 1.5
+      opacity: isDimmed ? 0.2 : 1.0,
+      borderWidth: borderWidth
     });
   });
   nodesDS.update(nodeUpdates);
-  
-  // 3. Обновляем рёбра одним пакетом
+
+  // Рёбра
   const edgeUpdates = [];
   familyData.relations.forEach((r, i) => {
     const show = visible[r.source] && visible[r.target];
     const inPath = pathEdges.has('e_' + i);
     const isMarriage = r.type === 'marriage';
-    
-    let color = r.type === 'parent' ? '#677C99' : (isMarriage ? '#ED9FC1' : '#859AB7');
+    let color = r.type === 'parent' ? currentPalette.edgeParent
+              : (isMarriage ? currentPalette.edgeMarriage : currentPalette.edgeSibling);
     if (inPath) color = currentPalette.path;
     else if (pathNodes.size > 0) color = 'rgba(148,163,184,0.15)';
-    
     edgeUpdates.push({
       id: 'e_' + i,
       hidden: !show,
@@ -368,12 +369,62 @@ function renderGraph() {
     });
   });
   edgesDS.update(edgeUpdates);
-  
-  document.getElementById('stat').textContent = visibleCount + ' персон';
+
+  document.getElementById('stat').textContent = count + ' персон';
 }
 
 // ============================================================
-// ПОИСК ПУТИ (используем кэш)
+// БЫСТРОЕ ПЕРЕКЛЮЧЕНИЕ ТЕМЫ (без перебора всех 150 узлов)
+// ============================================================
+function toggleTheme() {
+  if (themeLock) return;
+  themeLock = true;
+
+  isLightTheme = !isLightTheme;
+  document.body.classList.toggle('light-theme', isLightTheme);
+  currentPalette = isLightTheme ? palettes.light : palettes.dark;
+  document.getElementById('theme-btn').textContent = isLightTheme ? '🌙' : '☀️';
+  document.getElementById('meta-theme-color').content = currentPalette.bg;
+  try { localStorage.setItem('ftree-theme', isLightTheme ? 'light' : 'dark'); } catch(e){}
+
+  // 🔥 Мгновенно: меняем цвета групп (все узлы перекрасятся автоматически)
+  network.setOptions({
+    groups: {
+      male:   { color: { background: currentPalette.male,   border: currentPalette.male   }, font: { color: '#1B283B' } },
+      female: { color: { background: currentPalette.female, border: currentPalette.female }, font: { color: '#1B283B' } },
+      center: { color: { background: currentPalette.gold,   border: currentPalette.gold   }, font: { color: '#1B283B' } }
+    }
+  });
+
+  // 🔥 Перекрашиваем рёбра одним батчем
+  const edgeUpdates = [];
+  familyData.relations.forEach((r, i) => {
+    const inPath = pathEdges.has('e_' + i);
+    const isMarriage = r.type === 'marriage';
+    let color = r.type === 'parent' ? currentPalette.edgeParent
+              : (isMarriage ? currentPalette.edgeMarriage : currentPalette.edgeSibling);
+    if (inPath) color = currentPalette.path;
+    else if (pathNodes.size > 0) color = 'rgba(148,163,184,0.15)';
+    edgeUpdates.push({ id: 'e_' + i, color: color });
+  });
+  edgesDS.update(edgeUpdates);
+
+  // 🔥 Обновляем только выбранный узел (у него особый цвет рамки)
+  if (selectedId) {
+    nodesDS.update({
+      id: selectedId,
+      color: { border: isLightTheme ? '#334155' : '#FFFFFF' }
+    });
+  }
+
+  // 🔥 Если открыта панель — обновляем её цвет
+  if (selectedId) showPanel(selectedId);
+
+  themeLock = false;
+}
+
+// ============================================================
+// ПУТЬ РОДСТВА
 // ============================================================
 function findShortestPath(startId, targetId) {
   if (startId === targetId) return null;
@@ -394,8 +445,7 @@ function findShortestPath(startId, targetId) {
   const nodes = [targetId], edges = [];
   let cur = targetId;
   while (cur !== startId) {
-    const step = prev[cur];
-    edges.push(step.edge); cur = step.from; nodes.push(cur);
+    const step = prev[cur]; edges.push(step.edge); cur = step.from; nodes.push(cur);
   }
   return { nodes: nodes.reverse(), edges: edges.reverse() };
 }
@@ -405,7 +455,8 @@ function applyPath(from, to) {
   const banner = document.getElementById('path-banner');
   if (!res) {
     document.getElementById('path-text').textContent = 'Связь не найдена';
-    banner.classList.add('active'); return;
+    banner.classList.add('active');
+    return;
   }
   pathNodes = new Set(res.nodes);
   pathEdges = new Set(res.edges);
@@ -431,39 +482,28 @@ function clearPath() {
   renderGraph();
 }
 
-function toggleTheme() {
-  isLightTheme = !isLightTheme;
-  document.body.classList.toggle('light-theme', isLightTheme);
-  currentPalette = isLightTheme ? palettes.light : palettes.dark;
-  document.getElementById('theme-btn').textContent = isLightTheme ? '🌙' : '☀️';
-  document.getElementById('meta-theme-color').content = currentPalette.bg;
-  try { localStorage.setItem('ftree-theme', isLightTheme ? 'light' : 'dark'); } catch(e){}
-  renderGraph();
-  if (selectedId) showPanel(selectedId);
-}
-
 // ============================================================
-// ПАНЕЛЬ ПЕРСОНЫ
+// ПАНЕЛЬ
 // ============================================================
 function showPanel(id) {
   selectedId = id;
   const p = familyData.people.find(x => x.id === id);
   if (!p) return;
-  
+
   document.getElementById('p-name').textContent = p.name;
   document.getElementById('p-name').style.color = p.id === 'venera' ? currentPalette.gold
     : (p.sex === 'F' ? currentPalette.female : currentPalette.male);
-  
+
   let meta = [];
   if (p.dates) meta.push(p.dates);
   if (p.branch) meta.push(p.branch === 'paternal' ? 'Отцовская' : p.branch === 'maternal' ? 'Материнская' : 'Центр');
   document.getElementById('p-meta').textContent = meta.join(' · ');
-  
+
   let actions = '';
   if (id !== 'venera') actions += `<button class="action-chip gold" onclick="applyPath('${id}','venera')">★ Путь до Венеры</button>`;
   actions += `<button class="action-chip" onclick="startLink('${id}')">🧭 Связать с...</button>`;
   document.getElementById('p-actions').innerHTML = actions;
-  
+
   const parents = [], spouses = [], children = [], siblings = [];
   for (const r of familyData.relations) {
     if (r.type === 'parent') {
@@ -475,7 +515,7 @@ function showPanel(id) {
       else if (r.type === 'sibling') siblings.push(other);
     }
   }
-  
+
   let html = '';
   function addBlock(title, arr) {
     if (arr.length === 0) return;
@@ -490,7 +530,7 @@ function showPanel(id) {
   addBlock('Супруг(а)', spouses);
   addBlock('Дети', children);
   addBlock('Братья / Сёстры', siblings);
-  
+
   if (!html) html = '<div style="color:#A3B4CC;font-size:14px;">Нет данных о родственниках</div>';
   document.getElementById('p-relatives').innerHTML = html;
   document.getElementById('panel').classList.add('open');
@@ -504,6 +544,19 @@ function closePanel() {
 function focusPerson(id) {
   network.focus(id, { scale: 1.0, animation: { duration: 400 } });
   network.selectNodes([id]);
+  nodesDS.update({
+    id: id,
+    color: { border: isLightTheme ? '#334155' : '#FFFFFF' },
+    borderWidth: 3
+  });
+  if (selectedId && selectedId !== id) {
+    const old = familyData.people.find(x => x.id === selectedId);
+    if (old) {
+      const accent = old.id === 'venera' ? currentPalette.gold
+                   : (old.sex === 'F' ? currentPalette.female : currentPalette.male);
+      nodesDS.update({ id: old.id, color: { border: accent }, borderWidth: 1.5 });
+    }
+  }
   showPanel(id);
 }
 
@@ -522,33 +575,40 @@ function nextDraw(net) {
 async function exportPNG() {
   toast('Готовлю PNG...', 1500);
   await document.fonts.ready;
-  
+
   const host = document.createElement('div');
   const dpr = window.devicePixelRatio || 1;
   host.style.cssText = 'position:fixed;left:-100000px;top:0;width:' +
     Math.max(1, Math.floor(3600 / dpr)) + 'px;height:' +
     Math.max(1, Math.floor(2400 / dpr)) + 'px;';
   document.body.append(host);
-  
+
   let temp = null;
   try {
-    // Копия всех узлов без скрытия
     const exportNodes = familyData.people.map(buildNodeData);
     const exportEdges = familyData.relations.map(buildEdgeData);
-    
+
     temp = new vis.Network(host, {
       nodes: new vis.DataSet(exportNodes),
       edges: new vis.DataSet(exportEdges)
-    }, options);
-    
+    }, {
+      layout: options.layout,
+      physics: false,
+      nodes: options.nodes,
+      edges: options.edges,
+      groups: {
+        male:   { color: { background: currentPalette.male,   border: currentPalette.male   } },
+        female: { color: { background: currentPalette.female, border: currentPalette.female } },
+        center: { color: { background: currentPalette.gold,   border: currentPalette.gold   } }
+      }
+    });
+
     await nextDraw(temp);
     temp.fit({ animation: false });
     temp.moveTo({ scale: temp.getScale() * 0.85 });
     await nextDraw(temp);
-    
+
     const srcCanvas = host.querySelector('canvas');
-    if (!srcCanvas || !srcCanvas.width) throw new Error('Canvas не создан');
-    
     const outCanvas = document.createElement('canvas');
     outCanvas.width = srcCanvas.width;
     outCanvas.height = srcCanvas.height;
@@ -559,7 +619,7 @@ async function exportPNG() {
     ctx.fillStyle = currentPalette.muted;
     ctx.font = 'bold 22px "Segoe UI"';
     ctx.fillText('Семейное дерево · ' + familyData.people.length + ' персон', 28, outCanvas.height - 28);
-    
+
     outCanvas.toBlob(async (blob) => {
       if (!blob) { toast('Не удалось создать PNG'); return; }
       const file = new File([blob], 'tree.png', { type: 'image/png' });
@@ -575,40 +635,50 @@ async function exportPNG() {
 }
 
 // ============================================================
-// ИНИЦИАЛИЗАЦИЯ (отложенная, чтобы UI появился сразу)
+// ИНИЦИАЛИЗАЦИЯ
 // ============================================================
 function init() {
   buildAdjacency();
-  
-  // Строим узлы/рёбра один раз
+
   const initialNodes = familyData.people.map(buildNodeData);
   const initialEdges = familyData.relations.map(buildEdgeData);
-  
+
   nodesDS = new vis.DataSet(initialNodes);
   edgesDS = new vis.DataSet(initialEdges);
-  
+
   network = new vis.Network(container, { nodes: nodesDS, edges: edgesDS }, options);
-  
-  // Показываем UI
+
   document.getElementById('spinner').style.display = 'none';
   document.getElementById('header').style.display = 'flex';
   document.getElementById('fab-dock').style.display = 'flex';
-  
-  // Первый fit
+
   network.fit({ animation: false });
-  
-  // Применяем сохранённую тему
+
+  // Тема
   if (localStorage.getItem('ftree-theme') === 'light') {
     isLightTheme = true;
     document.body.classList.add('light-theme');
     currentPalette = palettes.light;
     document.getElementById('theme-btn').textContent = '🌙';
-    renderGraph();
-  } else {
-    document.getElementById('stat').textContent = familyData.people.length + ' персон';
+    document.getElementById('meta-theme-color').content = currentPalette.bg;
+    network.setOptions({
+      groups: {
+        male:   { color: { background: currentPalette.male,   border: currentPalette.male   } },
+        female: { color: { background: currentPalette.female, border: currentPalette.female } },
+        center: { color: { background: currentPalette.gold,   border: currentPalette.gold   } }
+      }
+    });
+    edgesDS.update(familyData.relations.map((r, i) => {
+      const isMarriage = r.type === 'marriage';
+      const color = r.type === 'parent' ? currentPalette.edgeParent
+                  : (isMarriage ? currentPalette.edgeMarriage : currentPalette.edgeSibling);
+      return { id: 'e_' + i, color: color };
+    }));
   }
-  
-  // Обработчики
+
+  document.getElementById('stat').textContent = familyData.people.length + ' персон';
+
+  // Клик
   network.on('click', params => {
     if (params.nodes.length > 0) {
       const clicked = params.nodes[0];
@@ -618,17 +688,18 @@ function init() {
         applyPath(src, clicked);
         return;
       }
-      showPanel(clicked);
+      focusPerson(clicked);
     } else { closePanel(); }
   });
-  
-  // 🔥 Дебаунсинг поиска (250 мс)
-  let searchTimer = null;
+
+  // Поиск (дебаунс)
+  let st = null;
   document.getElementById('search').addEventListener('input', () => {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(renderGraph, 250);
+    clearTimeout(st);
+    st = setTimeout(renderGraph, 200);
   });
-  
+
+  // Фильтры
   document.querySelectorAll('.filter-btn').forEach(btn => {
     btn.addEventListener('click', e => {
       document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
@@ -638,14 +709,13 @@ function init() {
       setTimeout(() => network.fit({ animation: true }), 50);
     });
   });
-  
+
   // Service Worker
   if ('serviceWorker' in navigator && location.protocol === 'https:') {
     navigator.serviceWorker.register('./sw.js', { scope: './' }).catch(err => console.warn(err));
   }
 }
 
-// Запуск через RAF — чтобы браузер сначала отрисовал спиннер
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => requestAnimationFrame(init));
 } else {
@@ -660,4 +730,4 @@ html = html.replace("__JSON_DATA__", json_str)
 os.makedirs(MOBILE_DIR, exist_ok=True)
 with open(os.path.join(MOBILE_DIR, "family_tree.html"), 'w', encoding='utf-8') as f:
     f.write(html)
-print("✅ family_tree.html создан (оптимизированная версия)")
+print("✅ family_tree.html создан (быстрое переключение темы)")
